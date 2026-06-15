@@ -2,7 +2,7 @@ import requests
 import sys
 import os
 
-TOKEN = os.environ.get("BEARER_TOKEN", "")
+TOKEN = os.environ.get("BEARER_TOKEN", "").strip()
 if not TOKEN:
     print("❌ Bearer token tidak ditemukan di environment!")
     sys.exit(1)
