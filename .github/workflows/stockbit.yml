@@ -3,6 +3,10 @@ on:
   schedule:
     - cron: '0 11 * * 1-5'
   workflow_dispatch:
+    inputs:
+      bearer:
+        description: 'Bearer token baru (opsional)'
+        required: false
 
 env:
   RUN_BROKSUM: "true"
@@ -15,6 +19,7 @@ jobs:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,6 +27,12 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install requests
+      - name: Update Bearer Token
+        if: ${{ inputs.bearer != '' }}
+        run: |
+          echo "::add-mask::${{ inputs.bearer }}"
+          echo "${{ inputs.bearer }}" | gh secret set BEARER_TOKEN
+          echo "BEARER_TOKEN=${{ inputs.bearer }}" >> $GITHUB_ENV
       - name: Check Bearer Token
         run: |
           python3 check_bearer.py || (
