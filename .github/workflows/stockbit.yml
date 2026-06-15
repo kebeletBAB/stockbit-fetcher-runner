@@ -78,17 +78,73 @@ jobs:
       - name: Run Profile (batch ${{ matrix.batch }})
         if: env.RUN_PROFILE == 'true'
         run: python stockbit_profile.py
+      - name: Upload error logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-log-batch-${{ matrix.batch }}
+          path: error_log_*.csv
+          if-no-files-found: ignore
 
   notify-done:
     needs: fetch
     runs-on: ubuntu-latest
-    if: success()
+    if: always()
     env:
+      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GH_TOKEN: ${{ secrets.GH_PAT }}
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Download all error logs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: error-log-batch-*
+          merge-multiple: true
+          path: error_logs/
+      - name: Gabung error logs & retry
+        run: |
+          python3 << 'PYEOF'
+          import csv, os, glob
+
+          # Gabung semua error log
+          all_errors = []
+          seen = set()
+          for f in glob.glob("error_logs/error_log_*.csv"):
+              with open(f, newline="") as fp:
+                  for row in csv.DictReader(fp):
+                      key = (row["ticker"], row["target"])
+                      if key not in seen:
+                          seen.add(key)
+                          all_errors.append(row)
+
+          if not all_errors:
+              print("Tidak ada error, skip retry")
+              exit(0)
+
+          # Tulis retry queue
+          with open("retry_queue.csv", "w", newline="") as f:
+              w = csv.writer(f)
+              for e in all_errors:
+                  w.writerow([e["ticker"], e["target"]])
+
+          print(f"Retry queue: {len(all_errors)} ticker")
+          PYEOF
+      - name: Run Retry
+        if: env.RUN_BROKSUM == 'true'
+        run: |
+          if [ -f retry_queue.csv ]; then
+            CSV_FILE=retry_queue.csv python stockbit_broksum.py
+          fi
       - name: Notify Success
         run: |
+          RETRY=$([ -f retry_queue.csv ] && wc -l < retry_queue.csv || echo 0)
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="✅ Selesai! Semua 9 batch berhasil diupdate ke Google Sheets."
+            -d text="✅ Selesai! Retry ${RETRY} ticker timeout."
