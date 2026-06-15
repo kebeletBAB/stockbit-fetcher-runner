@@ -15,8 +15,6 @@ env:
 jobs:
   check-bearer:
     runs-on: ubuntu-latest
-    permissions:
-      secrets: write
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
