@@ -15,6 +15,8 @@ env:
 jobs:
   check-bearer:
     runs-on: ubuntu-latest
+    outputs:
+      bearer: ${{ steps.set-bearer.outputs.bearer }}
     env:
       BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -32,6 +34,11 @@ jobs:
         run: |
           echo "::add-mask::${{ inputs.bearer }}"
           echo "${{ inputs.bearer }}" | gh secret set BEARER_TOKEN
+      - name: Set bearer output
+        id: set-bearer
+        run: |
+          echo "::add-mask::${BEARER_TOKEN}"
+          echo "bearer=${BEARER_TOKEN}" >> $GITHUB_OUTPUT
       - name: Check Bearer Token
         run: |
           python3 check_bearer.py || (
@@ -53,7 +60,7 @@ jobs:
         batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
       fail-fast: false
     env:
-      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
+      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       BATCH_INDEX: ${{ matrix.batch }}
