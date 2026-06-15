@@ -29,7 +29,7 @@ try:
     if r.status_code == 401:
         print("❌ Bearer token EXPIRED!")
         sys.exit(1)
-    elif r.status_code in [200, 400]:
+    elif r.status_code == 200:
         print("✅ Bearer token valid!")
     else:
         print(f"⚠️ Status: {r.status_code}")
