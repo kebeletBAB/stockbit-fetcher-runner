@@ -1,78 +1,77 @@
 name: Stockbit Fetcher
-
 on:
   schedule:
     - cron: '0 11 * * 1-5'
   workflow_dispatch:
 
 env:
-      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      RUN_BROKSUM: "true"
-      RUN_PROFILE: "false"
+  RUN_BROKSUM: "true"
+  RUN_PROFILE: "false"
 
 jobs:
-  fetch:
+  check-bearer:
     runs-on: ubuntu-latest
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install dependencies
         run: pip install requests
-
-      - name: Inject Bearer Token
-        run: |
-          python3 -c "
-          import re, os
-          token = os.environ['BEARER_TOKEN']
-          for f in ['stockbit_broksum.py', 'stockbit_profile.py']:
-              with open(f, 'r') as file:
-                  content = file.read()
-              content = re.sub(r'BEARER_TOKEN = \".*?\"', f'BEARER_TOKEN = \"{token}\"', content)
-              with open(f, 'w') as file:
-                  file.write(content)
-          print('Token injected')
-          "
-
       - name: Check Bearer Token
         run: |
           python3 check_bearer.py || (
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d text="⚠️ Stockbit Bearer Token EXPIRED! Update segera:
-          1. Buka stockbit.com
-          2. DevTools → Network → copy Bearer
-          3. Terminal: gh secret set BEARER_TOKEN" && exit 1
+              -d text="⚠️ Bearer Token EXPIRED! Kirim /bearer <token_baru> ke bot." && exit 1
           )
-
       - name: Notify Bearer OK
         run: |
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="🟢 Bearer token aman! Mulai fetch data Stockbit..."
+            -d text="🟢 Bearer token aman! Mulai fetch 9 batch paralel..."
 
-      - name: Run Broksum
+  fetch:
+    needs: check-bearer
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+      fail-fast: false
+    env:
+      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      BATCH_INDEX: ${{ matrix.batch }}
+      TOTAL_BATCHES: "9"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Broksum (batch ${{ matrix.batch }})
         if: env.RUN_BROKSUM == 'true'
         run: python stockbit_broksum.py
-
-      - name: Run Profile
+      - name: Run Profile (batch ${{ matrix.batch }})
         if: env.RUN_PROFILE == 'true'
         run: python stockbit_profile.py
 
+  notify-done:
+    needs: fetch
+    runs-on: ubuntu-latest
+    if: success()
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
       - name: Notify Success
-        if: success()
         run: |
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="✅ Selesai! Data Stockbit berhasil diupdate ke Google Sheets."
+            -d text="✅ Selesai! Semua 9 batch berhasil diupdate ke Google Sheets."

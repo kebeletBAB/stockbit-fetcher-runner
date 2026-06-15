@@ -27,7 +27,12 @@ from datetime import datetime
 import os
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN", "")
 
-CSV_FILE = "queue_full_eipo-idx-bfr2016.csv"  # kolom 1=ticker, kolom 2=target sheet
+CSV_FILE = "queue_full_eipo-idx-bfr2016.csv"
+
+# Batch config (parallel GitHub Actions)
+import os
+BATCH_INDEX   = int(os.environ.get("BATCH_INDEX", "0"))
+TOTAL_BATCHES = int(os.environ.get("TOTAL_BATCHES", "1"))  # kolom 1=ticker, kolom 2=target sheet
 
 FETCH_SHAREHOLDERS      = False  # True = kirim data shareholders
 FETCH_COMPANY_HISTORY   = False  # True = kirim data company history
@@ -236,6 +241,8 @@ def run():
     with open(CSV_FILE, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         rows = [r for r in reader if r and r[0].strip()]
+        rows = rows[BATCH_INDEX::TOTAL_BATCHES]
+        print(f"Batch {BATCH_INDEX+1}/{TOTAL_BATCHES} — {len(rows)} ticker")
 
     for i, row in enumerate(rows, 1):
         ticker = row[0].strip().upper()
