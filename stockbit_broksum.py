@@ -26,7 +26,7 @@ from datetime import datetime
 import os
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN", "")
 
-CSV_FILE = "queue_full_eipo-idx-bfr2016.csv"
+CSV_FILE = os.environ.get("CSV_FILE", "queue_full_eipo-idx-bfr2016.csv")
 
 # Batch config (parallel GitHub Actions)
 import os
