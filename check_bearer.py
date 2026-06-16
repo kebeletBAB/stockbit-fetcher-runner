@@ -13,6 +13,9 @@ headers = {
     "origin": "https://stockbit.com",
     "referer": "https://stockbit.com/",
     "x-platform": "web",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "accept": "application/json, text/plain, */*",
+    "accept-language": "id,en-US;q=0.9,en;q=0.8",
 }
 try:
     r = requests.get(
@@ -32,7 +35,7 @@ try:
     elif r.status_code == 200:
         print("✅ Bearer token valid!")
     else:
-        print(f"⚠️ Status: {r.status_code}")
+        print(f"⚠️ Status: {r.status_code} — {r.text[:100]}")
         sys.exit(1)
 except Exception as e:
     print(f"❌ Error: {e}")
