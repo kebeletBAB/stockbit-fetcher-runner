@@ -372,11 +372,31 @@ def run(mode):
         print(f"Error log disimpan: {err_file}")
 
 
+
+def wait_for_today_data():
+    from datetime import date
+    today = date.today().strftime("%Y-%m-%d")
+    for i in range(30):
+        try:
+            resp = fetch_stockbit("BBCA", "BROKER_SUMMARY_PERIOD_LATEST")
+            data_date = resp.get("data", {}).get("from", "")
+            if data_date == today:
+                print(f"✅ Data sudah update ke {today}")
+                return True
+            print(f"⏳ Data masih {data_date}, belum {today}. Tunggu 1 menit... ({i+1}/30)")
+        except Exception as e:
+            print(f"⚠️ Error cek data: {e}")
+        time.sleep(60)
+    return False
+
 if __name__ == "__main__":
     if not is_hari_bursa():
         print("Hari ini libur/weekend, skip fetch.")
         exit(0)
     if MODE_DAILY:
+        if not wait_for_today_data():
+            print("❌ Data tidak update setelah 30 menit, abort!")
+            exit(1)
         run("daily")
     if MODE_WEEKLY:
         run("weekly")
