@@ -39,6 +39,15 @@ jobs:
         run: |
           echo "::add-mask::${BEARER_TOKEN}"
           echo "bearer=${BEARER_TOKEN}" >> $GITHUB_OUTPUT
+      - name: Debug curl
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "authorization: Bearer ${BEARER_TOKEN}" \
+            -H "origin: https://stockbit.com" \
+            -H "x-platform: web" \
+            -H "user-agent: Mozilla/5.0" \
+            "https://exodus.stockbit.com/marketdetectors/BBCA?transaction_type=TRANSACTION_TYPE_NET&market_board=MARKET_BOARD_REGULER&investor_type=INVESTOR_TYPE_ALL&limit=1&period=BROKER_SUMMARY_PERIOD_LATEST")
+          echo "Curl status: $STATUS"
       - name: Check Bearer Token
         run: |
           python3 check_bearer.py || (
@@ -87,7 +96,7 @@ jobs:
           if-no-files-found: ignore
 
   notify-done:
-    needs: fetch
+    needs: [check-bearer, fetch]
     runs-on: ubuntu-latest
     if: always()
     env:
@@ -108,12 +117,12 @@ jobs:
           pattern: error-log-batch-*
           merge-multiple: true
           path: error_logs/
+        continue-on-error: true
       - name: Gabung error logs & retry
         run: |
           python3 << 'PYEOF'
           import csv, os, glob
 
-          # Gabung semua error log
           all_errors = []
           seen = set()
           for f in glob.glob("error_logs/error_log_*.csv"):
@@ -128,7 +137,6 @@ jobs:
               print("Tidak ada error, skip retry")
               exit(0)
 
-          # Tulis retry queue
           with open("retry_queue.csv", "w", newline="") as f:
               w = csv.writer(f)
               for e in all_errors:
@@ -142,7 +150,7 @@ jobs:
           if [ -f retry_queue.csv ]; then
             CSV_FILE=retry_queue.csv python stockbit_broksum.py
           fi
-      - name: Notify Success
+      - name: Notify Done
         run: |
           RETRY=$([ -f retry_queue.csv ] && wc -l < retry_queue.csv || echo 0)
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
