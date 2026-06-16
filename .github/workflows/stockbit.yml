@@ -9,8 +9,8 @@ on:
         required: false
 
 env:
-  RUN_BROKSUM: "true"
-  RUN_PROFILE: "false"
+  RUN_BROKSUM: "false"
+  RUN_PROFILE: "true"
 
 jobs:
   check-bearer:
