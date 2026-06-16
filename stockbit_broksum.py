@@ -34,7 +34,9 @@ LIBUR_2026 = [
 ]
 
 def is_hari_bursa():
-    today = date.today()
+    from datetime import timezone, timedelta
+    wib = timezone(timedelta(hours=7))
+    today = datetime.now(wib).date()
     if today.weekday() >= 5:
         return False
     if today.strftime("%Y-%m-%d") in LIBUR_2026:
