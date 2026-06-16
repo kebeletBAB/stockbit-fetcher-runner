@@ -36,7 +36,7 @@ TOTAL_BATCHES = int(os.environ.get("TOTAL_BATCHES", "1"))  # kolom 1=ticker, kol
 
 FETCH_SHAREHOLDERS      = False  # True = kirim data shareholders
 FETCH_COMPANY_HISTORY   = False  # True = kirim data company history
-FETCH_NUM_SHAREHOLDERS  = False   # True = kirim number of shareholders (paling sering)
+FETCH_NUM_SHAREHOLDERS  = True   # True = kirim number of shareholders (paling sering)
 
 DELAY_ANTAR_SAHAM = 1.0  # detik jeda antar ticker
 
