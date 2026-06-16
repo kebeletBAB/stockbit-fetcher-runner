@@ -17,13 +17,30 @@ import requests
 import csv
 import time
 import json
-from datetime import datetime
+from datetime import datetime, date
 
 # ====================================================================
 # CONFIG — EDIT DI SINI
 # ====================================================================
 
 import os
+
+LIBUR_2026 = [
+    "2026-01-01", "2026-01-16", "2026-02-16", "2026-02-17",
+    "2026-03-18", "2026-03-19", "2026-03-20", "2026-03-23", "2026-03-24",
+    "2026-04-03", "2026-05-01", "2026-05-14", "2026-05-15",
+    "2026-05-27", "2026-05-28", "2026-06-01", "2026-06-16",
+    "2026-08-17", "2026-08-25", "2026-12-24", "2026-12-25"
+]
+
+def is_hari_bursa():
+    today = date.today()
+    if today.weekday() >= 5:
+        return False
+    if today.strftime("%Y-%m-%d") in LIBUR_2026:
+        return False
+    return True
+
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN", "")
 
 CSV_FILE = os.environ.get("CSV_FILE", "queue_full_eipo-idx-bfr2016.csv")
@@ -356,6 +373,9 @@ def run(mode):
 
 
 if __name__ == "__main__":
+    if not is_hari_bursa():
+        print("Hari ini libur/weekend, skip fetch.")
+        exit(0)
     if MODE_DAILY:
         run("daily")
     if MODE_WEEKLY:
