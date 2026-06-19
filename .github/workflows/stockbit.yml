@@ -7,10 +7,15 @@ on:
       bearer:
         description: 'Bearer token baru (opsional)'
         required: false
+      force_run:
+        description: 'Force run meski libur/weekend (true/false)'
+        required: false
+        default: 'false'
 
 env:
   RUN_BROKSUM: "true"
   RUN_PROFILE: "false"
+  FORCE_RUN: ${{ inputs.force_run || 'false' }}
 
 jobs:
   check-bearer:
@@ -22,6 +27,7 @@ jobs:
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GH_TOKEN: ${{ secrets.GH_PAT }}
+      FORCE_RUN: ${{ inputs.force_run || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +40,11 @@ jobs:
         run: |
           echo "::add-mask::${{ inputs.bearer }}"
           echo "${{ inputs.bearer }}" | gh secret set BEARER_TOKEN
+      - name: Set bearer output
+        id: set-bearer
+        run: |
+          echo "::add-mask::${BEARER_TOKEN}"
+          echo "bearer=${BEARER_TOKEN}" >> $GITHUB_OUTPUT
       - name: Debug curl
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -69,6 +80,7 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       BATCH_INDEX: ${{ matrix.batch }}
       TOTAL_BATCHES: "9"
+      FORCE_RUN: ${{ inputs.force_run || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

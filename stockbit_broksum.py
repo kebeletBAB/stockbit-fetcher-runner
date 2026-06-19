@@ -392,7 +392,8 @@ def wait_for_today_data():
     return False
 
 if __name__ == "__main__":
-    if not is_hari_bursa():
+    force_run = os.environ.get("FORCE_RUN", "false").lower() == "true"
+    if not force_run and not is_hari_bursa():
         print("Hari ini libur/weekend, skip fetch.")
         exit(0)
     if MODE_DAILY:
