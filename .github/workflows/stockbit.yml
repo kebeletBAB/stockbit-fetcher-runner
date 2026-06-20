@@ -1,7 +1,7 @@
 name: Stockbit Fetcher
 on:
   schedule:
-    - cron: '0 11 * * 1-5'
+    - cron: '0 1 * * 1-5'
   workflow_dispatch:
     inputs:
       bearer:
@@ -11,11 +11,16 @@ on:
         description: 'Force run meski libur/weekend (true/false)'
         required: false
         default: 'false'
+      run_backfill:
+        description: 'Jalankan backfill dari backfill_queue.csv (true/false)'
+        required: false
+        default: 'false'
 
 env:
   RUN_BROKSUM: "true"
   RUN_PROFILE: "false"
   FORCE_RUN: ${{ inputs.force_run || 'false' }}
+  RUN_BACKFILL: ${{ inputs.run_backfill || 'false' }}
 
 jobs:
   check-bearer:
@@ -102,8 +107,33 @@ jobs:
           path: error_log_*.csv
           if-no-files-found: ignore
 
+  backfill:
+    needs: check-bearer
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run_backfill == 'true' }}
+    env:
+      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Backfill
+        run: python stockbit_backfill.py
+      - name: Upload error logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-log-backfill
+          path: error_log_backfill_*.csv
+          if-no-files-found: ignore
+
   notify-done:
-    needs: [check-bearer, fetch]
+    needs: [check-bearer, fetch, backfill]
     runs-on: ubuntu-latest
     if: always()
     env:
