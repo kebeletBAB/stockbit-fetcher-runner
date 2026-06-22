@@ -1,7 +1,7 @@
 name: Stockbit Fetcher
 on:
   schedule:
-    - cron: '0 1 * * 1-5'
+    - cron: '0 11 * * 1-5'
   workflow_dispatch:
     inputs:
       bearer:
@@ -12,7 +12,11 @@ on:
         required: false
         default: 'false'
       run_backfill:
-        description: 'Jalankan backfill dari backfill_queue.csv (true/false)'
+        description: 'Jalankan backfill GAS dari backfill_queue.csv (true/false)'
+        required: false
+        default: 'false'
+      run_broksum_db_backfill:
+        description: 'Jalankan backfill Broksum_DB 600 hari (true/false)'
         required: false
         default: 'false'
 
@@ -23,6 +27,9 @@ env:
   RUN_BACKFILL: ${{ inputs.run_backfill || 'false' }}
 
 jobs:
+  # ============================================================
+  # JOB 1: CEK BEARER TOKEN
+  # ============================================================
   check-bearer:
     runs-on: ubuntu-latest
     outputs:
@@ -64,14 +71,17 @@ jobs:
           python3 check_bearer.py || (
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
               -d chat_id="${TELEGRAM_CHAT_ID}" \
-              -d text="⚠️ Bearer Token EXPIRED! Kirim /bearer <token_baru> ke bot." && exit 1
+              -d text="Bearer Token EXPIRED! Kirim /bearer <token_baru> ke bot." && exit 1
           )
       - name: Notify Bearer OK
         run: |
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="🟢 Bearer token aman! Mulai fetch 9 batch paralel..."
+            -d text="Bearer token aman! Mulai fetch 9 batch paralel..."
 
+  # ============================================================
+  # JOB 2: FETCH BROKSUM -> GAS (existing, no change)
+  # ============================================================
   fetch:
     needs: check-bearer
     runs-on: ubuntu-latest
@@ -107,6 +117,44 @@ jobs:
           path: error_log_*.csv
           if-no-files-found: ignore
 
+  # ============================================================
+  # JOB 3: FETCH BROKSUM -> BROKSUM_DB (daily, 9 batch paralel)
+  # ============================================================
+  fetch-broksum-db:
+    needs: check-bearer
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+      fail-fast: false
+    env:
+      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+      BROKSUM_DB_ID: ${{ secrets.BROKSUM_DB_ID }}
+      BATCH_INDEX: ${{ matrix.batch }}
+      TOTAL_BATCHES: "9"
+      MODE: "daily"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests gspread
+      - name: Setup Google credentials
+        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
+      - name: Run Broksum DB daily (batch ${{ matrix.batch }})
+        run: python stockbit_broksum_db.py
+      - name: Upload error logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-log-db-batch-${{ matrix.batch }}
+          path: error_log_db_*.csv
+          if-no-files-found: ignore
+
+  # ============================================================
+  # JOB 4: BACKFILL GAS (existing, no change)
+  # ============================================================
   backfill:
     needs: check-bearer
     runs-on: ubuntu-latest
@@ -132,8 +180,42 @@ jobs:
           path: error_log_backfill_*.csv
           if-no-files-found: ignore
 
+  # ============================================================
+  # JOB 5: BACKFILL BROKSUM_DB 600 HARI (manual trigger only)
+  # ============================================================
+  backfill-broksum-db:
+    needs: check-bearer
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run_broksum_db_backfill == 'true' }}
+    env:
+      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+      BROKSUM_DB_ID: ${{ secrets.BROKSUM_DB_ID }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      MODE: "backfill"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests gspread
+      - name: Setup Google credentials
+        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
+      - name: Run Broksum DB Backfill 600 hari
+        run: python stockbit_broksum_db.py
+      - name: Notify Done
+        if: always()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="Broksum DB backfill 600 hari selesai!"
+
+  # ============================================================
+  # JOB 6: NOTIFY DONE
+  # ============================================================
   notify-done:
-    needs: [check-bearer, fetch, backfill]
+    needs: [check-bearer, fetch, fetch-broksum-db, backfill, backfill-broksum-db]
     runs-on: ubuntu-latest
     if: always()
     env:
@@ -192,4 +274,4 @@ jobs:
           RETRY=$([ -f retry_queue.csv ] && wc -l < retry_queue.csv || echo 0)
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="✅ Selesai! Retry ${RETRY} ticker timeout."
+            -d text="Selesai! Retry ${RETRY} ticker timeout."
