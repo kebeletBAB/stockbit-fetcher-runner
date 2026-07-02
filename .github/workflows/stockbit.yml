@@ -19,10 +19,15 @@ on:
         description: 'Jalankan backfill Broksum_DB 600 hari (true/false)'
         required: false
         default: 'false'
+      run_broksum_db:
+        description: 'Jalankan fetch Broksum_DB harian (true/false)'
+        required: false
+        default: 'false'
 
 env:
   RUN_BROKSUM: "true"
   RUN_PROFILE: "false"
+  RUN_BROKSUM_DB: ${{ inputs.run_broksum_db || 'false' }}
   FORCE_RUN: ${{ inputs.force_run || 'false' }}
   RUN_BACKFILL: ${{ inputs.run_backfill || 'false' }}
 
@@ -123,6 +128,7 @@ jobs:
   fetch-broksum-db:
     needs: check-bearer
     runs-on: ubuntu-latest
+    if: ${{ inputs.run_broksum_db == 'true' }}
     strategy:
       matrix:
         batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
