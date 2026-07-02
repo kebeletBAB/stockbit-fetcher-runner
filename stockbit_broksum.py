@@ -18,6 +18,7 @@ import csv
 import time
 import json
 import re
+import sys
 from datetime import datetime, date
 
 # ====================================================================
@@ -396,10 +397,18 @@ if __name__ == "__main__":
     if not force_run and not is_hari_bursa():
         print("Hari ini libur/weekend, skip fetch.")
         exit(0)
-    if MODE_DAILY:
+
+    if "--wait-only" in sys.argv:
+        # Dipanggil dari job gate wait-for-data — cek sekali untuk semua batch
         if not wait_for_today_data():
             print("❌ Data tidak update setelah 30 menit, abort!")
             exit(1)
+        print("✅ Gate lolos — data sudah settle, matrix job siap jalan.")
+        exit(0)
+
+    # Dipanggil dari job matrix fetch(0-8) — SKIP wait,
+    # karena job wait-for-data sudah memastikan data settle sebelum job ini mulai
+    if MODE_DAILY:
         run("daily")
     if MODE_WEEKLY:
         run("weekly")

@@ -85,10 +85,29 @@ jobs:
             -d text="Bearer token aman! Mulai fetch 9 batch paralel..."
 
   # ============================================================
+  # JOB 1.5: GATE - TUNGGU DATA SETTLE (SEKALI SAJA UNTUK SEMUA BATCH)
+  # ============================================================
+  wait-for-data:
+    needs: check-bearer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Tunggu data settle (1x cek untuk semua batch)
+        env:
+          BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+          FORCE_RUN: ${{ inputs.force_run || 'false' }}
+        run: python stockbit_broksum.py --wait-only
+
+  # ============================================================
   # JOB 2: FETCH BROKSUM -> GAS (existing, no change)
   # ============================================================
   fetch:
-    needs: check-bearer
+    needs: [check-bearer, wait-for-data]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -126,7 +145,7 @@ jobs:
   # JOB 3: FETCH BROKSUM -> BROKSUM_DB (daily, 9 batch paralel)
   # ============================================================
   fetch-broksum-db:
-    needs: check-bearer
+    needs: [check-bearer, wait-for-data]
     runs-on: ubuntu-latest
     if: ${{ inputs.run_broksum_db == 'true' }}
     strategy:
@@ -221,7 +240,7 @@ jobs:
   # JOB 6: NOTIFY DONE
   # ============================================================
   notify-done:
-    needs: [check-bearer, fetch, fetch-broksum-db, backfill, backfill-broksum-db]
+    needs: [check-bearer, wait-for-data, fetch, fetch-broksum-db, backfill, backfill-broksum-db]
     runs-on: ubuntu-latest
     if: always()
     env:
