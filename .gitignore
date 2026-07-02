@@ -33,3 +33,16 @@ ohlc_progress_*.txt
 
 # Cron setup script (kalau berisi path/config lokal)
 cron_setup.sh
+
+# Virtual environment
+venv/
+
+# Logs
+logs/
+
+# Progress tracking files (state lokal, gak perlu di-version)
+backfill_progress_*.txt
+ohlc_progress_*.txt
+
+# Cron setup script (kalau berisi path/config lokal)
+cron_setup.sh

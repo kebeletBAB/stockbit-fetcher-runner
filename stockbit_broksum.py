@@ -17,6 +17,7 @@ import requests
 import csv
 import time
 import json
+import re
 from datetime import datetime, date
 
 # ====================================================================
@@ -252,7 +253,7 @@ def transform(ticker, data, tab_id):
 
     vol_data.append(["Net Volume", fmt_lot(net_vol), "", "", "", ""])
     vol_colors.append([None]*6)
-    vol_data.append(["Net Value", "0B" if net_val == 0 else fmt_val(net_val), "", "", "", ""])
+    vol_data.append(["Net Value", f"{fmt_rp_b(net_val)}B", "", "", "", ""])
     vol_colors.append([None]*6)
     vol_data.append(["Average (Rp)", fmt_avg(avg_rp), "", "", "", ""])
     vol_colors.append([None]*6)
@@ -326,9 +327,8 @@ def run(mode):
 
     for i, row in enumerate(rows, 1):
         ticker = row[0].strip().upper()
-        target = row[1].strip().replace(r"[^a-zA-Z0-9_]", "") if len(row) > 1 else ""
+        target = row[1].strip() if len(row) > 1 else ""
         # Bersihkan karakter non-alphanumeric (sama seperti GAS regex)
-        import re
         target = re.sub(r"[^a-zA-Z0-9_]", "", target)
 
         gas_url = URL_MAP.get(target)
