@@ -176,9 +176,25 @@ def get_or_create_tab(spreadsheet, tab):
                 raise
     raise Exception(f"Gagal akses tab {tab}")
 
+def sanitize_row(row):
+    """V1.1 (9 Jul 2026 FIX): yfinance kadang balikin NaN (float) buat
+    ticker yang suspend/gak ada transaksi di hari itu -- NaN BUKAN JSON
+    valid, dan gspread.append_rows() ngirim payload via JSON, jadi crash
+    TOTAL (ValueError: Out of range float values are not JSON compliant)
+    kalau ada 1 aja NaN di 1 baris. Ganti NaN jadi string kosong sebelum
+    dikirim -- jangan sampai 1 ticker bermasalah menjatuhkan seluruh batch."""
+    clean = []
+    for v in row:
+        if isinstance(v, float) and v != v:  # NaN != NaN, cara cek tanpa import math
+            clean.append("")
+        else:
+            clean.append(v)
+    return clean
+
 def push_rows_to_tab(ws, rows):
     if not rows:
         return
+    rows = [sanitize_row(r) for r in rows]
     for i in range(0, len(rows), BATCH_SIZE):
         chunk = rows[i:i+BATCH_SIZE]
         for attempt in range(5):
@@ -248,15 +264,22 @@ def process_ticker_full(ticker, universe, from_date, to_date, spreadsheet):
             by_month[key] = []
         by_month[key].append(row)
 
-    total_ok = 0
+    total_ok, total_err = 0, 0
     for ym, month_rows in sorted(by_month.items()):
         d0 = datetime.strptime(month_rows[0][1], "%d/%m/%Y").date()
         tab = tab_name(universe, d0)
-        ws = get_or_create_tab(spreadsheet, tab)
-        push_rows_to_tab(ws, month_rows)
-        total_ok += len(month_rows)
+        try:
+            ws = get_or_create_tab(spreadsheet, tab)
+            push_rows_to_tab(ws, month_rows)
+            total_ok += len(month_rows)
+        except Exception as e:
+            # V1.1 FIX: jangan sampai 1 ticker/bulan gagal push (NaN, 429
+            # yang gak ke-retry, dll) menjatuhkan SELURUH batch -- skip
+            # bulan ini, lanjut ke ticker berikutnya.
+            print(f"\n  ERROR push {ticker} bulan {ym}: {e} -- skip, lanjut")
+            total_err += len(month_rows)
 
-    return total_ok, 0
+    return total_ok, total_err
 
 # ====================================================================
 # MODE: BACKFILL
