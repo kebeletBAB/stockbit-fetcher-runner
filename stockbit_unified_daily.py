@@ -29,11 +29,13 @@ BROKER-COUNT-NET-BUY-5D (buat Edge #3, lihat FINDINGS_FINAL_2EDGE_7Jul2026.md):
     kalender -- lompatin weekend & libur nasional otomatis, karena window-nya
     dibangun dari tanggal yang BENERAN ADA datanya di BROKSUM_DB_*_Broker),
     baru hitung berapa broker yang hasilnya net POSITIF.
-  - H-1 s.d. H-4 diambil dari data yang SUDAH tersimpan di BROKSUM_DB_*_Broker
-    (di-load sekali per bulan per universe di awal run, di-cache di memory --
-    supaya tidak baca ulang sheet per-ticker, hemat panggilan Sheets API).
-    H-hari-ini diambil dari fetch yang baru saja dilakukan (belum sempat
-    tersimpan di sheet saat perhitungan ini jalan).
+  - H-1 s.d. H-5 (5 hari bursa SEBELUM hari ini, BUKAN termasuk hari ini
+    -- lihat CHANGELOG V1.7) diambil semuanya dari data yang SUDAH
+    tersimpan di BROKSUM_DB_*_Broker (di-load sekali per bulan per
+    universe di awal run, di-cache di memory -- supaya tidak baca ulang
+    sheet per-ticker, hemat panggilan Sheets API). Data live hari ini
+    TIDAK dipakai untuk hitungan ini sama sekali (baru dipakai besok,
+    setelah ter-push dan settle).
   - Hasil angka ini ditulis ke "10 Fungsi" sebagai baris ke-11 di payload
     volume (vol_data), format ["Broker Net-Buy 5D", <angka>, "", "", "", ""] --
     otomatis jatuh di baris 190 kolom vStartCol(label)/vStartCol+1(angka),
@@ -44,6 +46,22 @@ Setup: SAMA seperti 3 script lama -- reuse credentials.json, BEARER_TOKEN,
   CSV_FILE (queue ticker+universe), URL_MAP ("10 Fungsi"), BROKSUM_DB_IDX/
   EIPO/BFR2016 (flat aggregate), broker_db_registry_{universe}.json (rotasi
   individual broker, dibuat otomatis kalau belum ada).
+
+V1.7 (9 Jul 2026 FIX -- root cause broker5D selalu None): window
+  broker-count-5D DIPERBAIKI dari H0..H-4 (termasuk hari ini, pakai data
+  live fetch) menjadi H-1..H-5 (5 hari bursa SEBELUM hari ini, murni dari
+  index tersimpan yang sudah settle). Dikonfirmasi lewat pengecekan
+  ulang ke broker_count_test.py (riset asli): window di sana pakai slice
+  `dates[i-5:i]` -- TIDAK menyertakan event_date/H0. Komentar lama di
+  file ini yang bilang "H-hari-ini diambil dari fetch live" TERNYATA
+  SALAH/tidak sesuai riset yang divalidasi -- kemungkinan asumsi keliru
+  waktu port awal ke produksi. Dampak bug lama: broker5D jadi None terus-
+  menerus setiap kali broker_summary Stockbit utk hari itu belum lengkap
+  saat jam pipeline jalan (fetch live gagal/kosong), WALAU histori index
+  4 hari sebelumnya sudah cukup -- padahal seharusnya tidak pernah butuh
+  data live sama sekali untuk hitungan ini. Sekarang broker5D 100% dari
+  data yang sudah settle di BROKSUM_DB_*_Broker, tidak bergantung fetch
+  hari berjalan.
 
 V1.3 (9 Jul 2026 -- untuk integrasi GitHub Actions/stockbit.yml):
   - BATCH_INDEX/TOTAL_BATCHES: pembagian batch paralel (pola sama seperti
@@ -653,19 +671,31 @@ def preload_broker_index(universe, registry, months_needed):
                 index[ticker][tgl][broker] = index[ticker][tgl].get(broker, 0) + signed
     return index
 
-def hitung_broker_count_5d(ticker, tanggal_5_hari, index, today_rows_today):
-    """tanggal_5_hari: list 5 date object (H-4..hari ini, urut lama->baru).
-    index: hasil preload_broker_index (H-1..H-4, dari sheet).
-    today_rows_today: list baris broker individual HARI INI (dari fetch
-    yang baru saja dilakukan, BELUM ada di index karena belum sempat push).
-    Return: int (jumlah broker net-buy positif selama 5 hari), atau None
-    kalau data historis kurang dari 5 hari (misal ticker baru)."""
-    net_per_broker = {}
-    hari_ini_str = fmt_date_ddmmyyyy(tanggal_5_hari[-1])
-    hari_lain = tanggal_5_hari[:-1]
+def hitung_broker_count_5d(ticker, tanggal_5_hari, index, today_rows_today=None):
+    """tanggal_5_hari: list 5 date object H-1..H-5 (5 hari bursa TERAKHIR
+    SEBELUM hari ini, urut lama->baru) -- sesuai metodologi tervalidasi
+    (window H-1..H-5, BUKAN termasuk hari ini).
+    index: hasil preload_broker_index, sudah mencakup ke-5 hari ini karena
+    semuanya adalah hari yang sudah settle/di-push sebelumnya.
 
+    V1.7 (9 Jul 2026 FIX -- root cause 'broker5D selalu None'): sebelumnya
+    window ini keliru menyertakan HARI INI (H0..H-4) dan mewajibkan data
+    fetch live hari ini supaya genap 5 -- kalau broker_summary utk hari
+    ini kebetulan belum lengkap di sisi Stockbit (atau gagal fetch),
+    hasilnya SELALU None walau histori 5 hari sebelumnya sudah lengkap
+    di index. Sekarang window murni H-1..H-5, semuanya dari index yang
+    sudah settle, TIDAK butuh data hari ini sama sekali untuk hitungan
+    ini. Parameter today_rows_today dipertahankan (default None) supaya
+    tidak break kalau ada pemanggil lama, tapi tidak lagi dipakai di
+    hitungan -- sengaja tidak dihapus dari signature untuk kompatibilitas.
+
+    Return: int (jumlah broker net-buy positif selama 5 hari bursa
+    terakhir), atau None kalau histori index kurang dari 5 hari (misal
+    ticker baru / awal backfill individual broker)."""
+    net_per_broker = {}
     hari_tersedia = 0
-    for d in hari_lain:
+
+    for d in tanggal_5_hari:
         tgl_str = fmt_date_ddmmyyyy(d)
         data_hari = index.get(ticker, {}).get(tgl_str)
         if data_hari is None:
@@ -673,15 +703,6 @@ def hitung_broker_count_5d(ticker, tanggal_5_hari, index, today_rows_today):
         hari_tersedia += 1
         for broker, val in data_hari.items():
             net_per_broker[broker] = net_per_broker.get(broker, 0) + val
-
-    # Tambahkan data hari ini (dari fetch barusan, belum ada di index)
-    if today_rows_today:
-        hari_tersedia += 1
-        for row in today_rows_today:
-            # row format: [ticker, tgl, broker, type, side, value, lot, avgprice, rank]
-            broker, side, value = row[2], row[4], row[5]
-            signed = value if side == "buy" else -value
-            net_per_broker[broker] = net_per_broker.get(broker, 0) + signed
 
     if hari_tersedia < 5:
         # Data historis belum cukup (ticker baru / awal backfill individual
@@ -744,8 +765,12 @@ def run_daily(tickers_by_universe, ticker_target, flat_spreadsheets, broker_regi
         if not registry:
             print(f"  [info] {universe}: broker-registry belum diset -- skip push broker-level + broker-count-5D jadi None.")
 
-        # 5 hari bursa terakhir termasuk hari ini -- H-4..hari ini.
-        tanggal_5_hari = get_last_n_hari_bursa(today, 5)
+        # V1.7 FIX: 5 hari bursa TERAKHIR SEBELUM hari ini (H-1..H-5),
+        # BUKAN termasuk hari ini -- sesuai metodologi tervalidasi & supaya
+        # broker-count-5D tidak bergantung pada data live hari ini yang
+        # kadang belum lengkap di sisi Stockbit (root cause broker5D=None
+        # terus-menerus walau histori index sudah cukup).
+        tanggal_5_hari = get_last_n_hari_bursa(today - timedelta(days=1), 5)
         bulan_dibutuhkan = set(d.replace(day=1) for d in tanggal_5_hari)
 
         print(f"\n--- {universe} ({len(tickers)} ticker) ---")
@@ -779,9 +804,12 @@ def run_daily(tickers_by_universe, ticker_target, flat_spreadsheets, broker_regi
                     broker_rows_batch.extend(broker_rows_today)
 
                 # 3) Broker-count-5D -- None kalau registry belum diset
-                #    (bukan dianggap 0, biar tidak menyesatkan Edge3)
+                #    (bukan dianggap 0, biar tidak menyesatkan Edge3).
+                #    V1.7: tidak lagi butuh broker_rows_today (data hari
+                #    ini) -- window murni H-1..H-5 dari index yang sudah
+                #    settle, lihat komentar di hitung_broker_count_5d().
                 broker_count_5d = hitung_broker_count_5d(
-                    ticker, tanggal_5_hari, index_broker, broker_rows_today
+                    ticker, tanggal_5_hari, index_broker
                 ) if registry else None
 
                 # 4) Push "10 Fungsi" daily (kalau URL target dikenali) --
