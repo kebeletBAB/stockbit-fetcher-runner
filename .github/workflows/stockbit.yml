@@ -1,5 +1,15 @@
 name: Stockbit Fetcher
 
+# V1.12 (9 Jul 2026 FIX): tambah concurrency group -- run baru (manual
+# atau cron) OTOMATIS cancel run sebelumnya yang masih jalan di branch
+# yang sama, supaya gak numpuk beberapa run paralel tanpa sadar (kejadian
+# nyata: trigger ulang beberapa kali sebelum run lama benar-benar
+# selesai/di-cancel, jadi 4 run jalan bareng dan rebutan kuota Sheets API
+# makin parah). cancel-in-progress: true = otomatis, gak perlu cancel manual.
+concurrency:
+  group: stockbit-fetcher-${{ github.ref }}
+  cancel-in-progress: true
+
 # ====================================================================
 # V2 (9 Jul 2026): job "fetch" (stockbit_broksum.py) dan "fetch-broksum-db"
 # (stockbit_broksum_db.py) DIGABUNG jadi satu job "fetch-unified" yang
@@ -218,7 +228,9 @@ jobs:
             cp credentials.json credentials_flat_bfr2016.json
           fi
       - name: Run Unified Daily (batch ${{ matrix.batch }})
-        run: python stockbit_unified_daily.py
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u stockbit_unified_daily.py
       - name: Upload error logs
         if: always()
         uses: actions/upload-artifact@v4
