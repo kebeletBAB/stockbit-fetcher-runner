@@ -302,7 +302,9 @@ jobs:
       - name: Setup Google credentials (broker-level IDX)
         run: echo "${{ secrets.GOOGLE_CREDENTIALS_IDX }}" | base64 -d > credentials_idx.json
       - name: Run gap-scan IDX (batch ${{ matrix.batch }})
-        run: python stockbit_broker_flatlog_db.py
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u stockbit_broker_flatlog_db.py
 
   gap-scan-eipo:
     runs-on: ubuntu-latest
@@ -330,7 +332,9 @@ jobs:
       - name: Setup Google credentials (broker-level eIPO)
         run: echo "${{ secrets.GOOGLE_CREDENTIALS_EIPO }}" | base64 -d > credentials_eipo.json
       - name: Run gap-scan eIPO (batch ${{ matrix.batch }})
-        run: python stockbit_broker_flatlog_db.py
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u stockbit_broker_flatlog_db.py
 
   gap-scan-bfr2016:
     runs-on: ubuntu-latest
@@ -358,7 +362,9 @@ jobs:
       - name: Setup Google credentials (broker-level Bfr2016)
         run: echo "${{ secrets.GOOGLE_CREDENTIALS_BFR2016 }}" | base64 -d > credentials_bfr2016.json
       - name: Run gap-scan Bfr2016 (batch ${{ matrix.batch }})
-        run: python stockbit_broker_flatlog_db.py
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u stockbit_broker_flatlog_db.py
 
   # ============================================================
   # JOB 3: BACKFILL GAS (existing, no change)
