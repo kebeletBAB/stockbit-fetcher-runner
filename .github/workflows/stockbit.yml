@@ -55,6 +55,10 @@ on:
         description: 'Skip wait-for-data + fetch-unified (true kalau cuma mau jalanin gap-scan/backfill sendiri, hindari dobel push hari ini) (true/false)'
         required: false
         default: 'false'
+      force_fetch_date:
+        description: 'Paksa fetch-unified jalan SEKARANG tanpa nunggu wait-for-data, label baris pakai tanggal ini (format YYYY-MM-DD, misal 2026-07-08). Kosongkan = perilaku normal (nunggu data settle hari ini).'
+        required: false
+        default: ''
 
 env:
   FORCE_RUN: ${{ inputs.force_run || 'false' }}
@@ -121,7 +125,10 @@ jobs:
   wait-for-data:
     needs: check-bearer
     runs-on: ubuntu-latest
-    if: ${{ inputs.skip_daily_fetch != 'true' }}
+    # Skip juga kalau force_fetch_date diisi -- kita SENGAJA gak mau nunggu
+    # data "hari ini" settle, karena mau paksa fetch LATEST sekarang juga
+    # dan label pakai tanggal yang ditentukan manual (lihat job fetch-unified).
+    if: ${{ inputs.skip_daily_fetch != 'true' && inputs.force_fetch_date == '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -146,7 +153,11 @@ jobs:
   fetch-unified:
     needs: [check-bearer, wait-for-data]
     runs-on: ubuntu-latest
-    if: ${{ inputs.skip_daily_fetch != 'true' }}
+    # always() -- supaya job ini TETAP jalan meski wait-for-data di-skip
+    # (kasus force_fetch_date diisi, lihat job wait-for-data). Kalau
+    # always() dipakai, harus manual cek check-bearer sukses (always()
+    # membatalkan auto-skip bawaan GitHub Actions kalau needs gagal/skip).
+    if: ${{ always() && needs.check-bearer.result == 'success' && inputs.skip_daily_fetch != 'true' }}
     strategy:
       matrix:
         batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
@@ -156,6 +167,7 @@ jobs:
       BATCH_INDEX: ${{ matrix.batch }}
       TOTAL_BATCHES: "9"
       FORCE_RUN: ${{ inputs.force_run || 'false' }}
+      TARGET_DATE: ${{ inputs.force_fetch_date || '' }}
       MODE_DAILY: "1"
       MODE_WEEKLY: "1"
       MODE_MONTHLY: "1"

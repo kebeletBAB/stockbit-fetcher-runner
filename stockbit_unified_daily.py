@@ -184,6 +184,15 @@ MODE_DAILY   = os.environ.get("MODE_DAILY", "1") == "1"
 MODE_WEEKLY  = os.environ.get("MODE_WEEKLY", "1") == "1"
 MODE_MONTHLY = os.environ.get("MODE_MONTHLY", "1") == "1"
 
+# V1.9 (9 Jul 2026, force-run tanpa nunggu wait-for-data): kalau diset
+# (format YYYY-MM-DD), dipakai sebagai "today" pengganti date.today() --
+# buat kasus mau paksa fetch SEKARANG walau Stockbit API masih balikin
+# LATEST = data hari kemarin (market belum buka/data belum settle), tapi
+# tetap mau label baris di sheet dengan tanggal yang BENAR (bukan ikut
+# tanggal sistem yang sudah ganti hari). Kosong (default) = perilaku lama,
+# pakai date.today() seperti biasa.
+TARGET_DATE = os.environ.get("TARGET_DATE", "")
+
 # V1.3: batch paralel (lihat load_tickers()) -- default TOTAL_BATCHES=1
 # artinya semua ticker diproses 1 proses (perilaku lokal yang sudah diuji,
 # tidak berubah kalau tidak di-set lewat GitHub Actions matrix).
@@ -763,7 +772,10 @@ def load_tickers():
     return tickers_by_universe, ticker_target
 
 def run_daily(tickers_by_universe, ticker_target, flat_spreadsheets, broker_registries):
-    today = date.today()
+    today = date.fromisoformat(TARGET_DATE) if TARGET_DATE else date.today()
+    if TARGET_DATE:
+        print(f"[force] TARGET_DATE diset -- pakai {fmt_date_ddmmyyyy(today)} sebagai 'today', "
+              f"BUKAN tanggal sistem. Pastikan Stockbit LATEST memang masih data tanggal ini.")
     print(f"\n{'='*60}\n  DAILY -- {fmt_date_ddmmyyyy(today)}\n{'='*60}\n")
 
     if not is_hari_bursa(today):
@@ -817,6 +829,21 @@ def run_daily(tickers_by_universe, ticker_target, flat_spreadsheets, broker_regi
                 data = json_resp.get("data")
                 if not data:
                     raise ValueError(f"Response tidak ada 'data': {json_resp}")
+
+                # V1.9 SAFETY CHECK: kalau TARGET_DATE dipaksa (force_fetch_date),
+                # WAJIB pastikan data yang beneran di-fetch dari Stockbit itu
+                # tanggalnya SAMA PERSIS dengan TARGET_DATE -- kalau ternyata
+                # Stockbit sudah rollover ke hari berikutnya (misal market
+                # sudah mulai update), JANGAN push dengan label yang salah.
+                # Lebih baik gagal jelas (masuk error_log, bisa di-retry nanti)
+                # daripada diam-diam menulis data salah tanggal ke sheet.
+                if TARGET_DATE:
+                    data_date_raw = str(data.get("from", ""))[:10]
+                    if data_date_raw != TARGET_DATE:
+                        raise ValueError(
+                            f"TARGET_DATE={TARGET_DATE} tapi Stockbit LATEST sudah "
+                            f"'{data_date_raw}' -- sudah rollover, SKIP biar gak salah label."
+                        )
 
                 # 1) Flat aggregate row -> BROKSUM_DB (kalau flat_ss ada)
                 if flat_ss:
