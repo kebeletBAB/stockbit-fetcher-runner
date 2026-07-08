@@ -267,9 +267,10 @@ jobs:
   # Pakai fetch_by_date_range (?from=&to=) di stockbit_broker_flatlog_db.py,
   # BUKAN period=LATEST -- ini yang bikin backfill tanggal LAMA masih
   # mungkin (beda dari stockbit_unified_daily.py yang cuma bisa fetch
-  # "hari ini"). 9 batch paralel per universe (biar cepat), stagger
-  # 15s/batch (lihat V1.1 di script) supaya "load semua tab dulu" gak
-  # numpuk kena 429 bareng 9 proses.
+  # "hari ini"). 3 batch paralel per universe (dikurangi dari 9 -- gap
+  # scan load SEMUA tab historis dulu per batch, jadi makin banyak batch
+  # makin gampang numpuk kena rate-limit 429/500 bareng), stagger
+  # 15s/batch (lihat V1.1 di script) supaya tidak numpuk di detik yang sama.
   # PENTING: BROKSUM_DB_<UNIVERSE> di job ini SENGAJA diisi dari secret
   # BROKSUM_DB_BROKER_<UNIVERSE> (bukan BROKSUM_DB_<UNIVERSE> biasa) --
   # script ini butuh env var literal bernama BROKSUM_DB_<UNIVERSE> tapi
@@ -281,7 +282,7 @@ jobs:
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'IDX' || inputs.gap_scan_universe == 'all') }}
     strategy:
       matrix:
-        batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+        batch: [0, 1, 2]
       fail-fast: false
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
@@ -289,7 +290,7 @@ jobs:
       UNIVERSE: IDX
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
       BATCH_INDEX: ${{ matrix.batch }}
-      TOTAL_BATCHES: "9"
+      TOTAL_BATCHES: "3"
       CREDENTIALS_IDX: "credentials_idx.json"
       BROKSUM_DB_IDX: ${{ secrets.BROKSUM_DB_BROKER_IDX }}
     steps:
@@ -311,7 +312,7 @@ jobs:
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'eIPO' || inputs.gap_scan_universe == 'all') }}
     strategy:
       matrix:
-        batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+        batch: [0, 1, 2]
       fail-fast: false
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
@@ -319,7 +320,7 @@ jobs:
       UNIVERSE: eIPO
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
       BATCH_INDEX: ${{ matrix.batch }}
-      TOTAL_BATCHES: "9"
+      TOTAL_BATCHES: "3"
       CREDENTIALS_EIPO: "credentials_eipo.json"
       BROKSUM_DB_EIPO: ${{ secrets.BROKSUM_DB_BROKER_EIPO }}
     steps:
@@ -341,7 +342,7 @@ jobs:
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'Bfr2016' || inputs.gap_scan_universe == 'all') }}
     strategy:
       matrix:
-        batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+        batch: [0, 1, 2]
       fail-fast: false
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
@@ -349,7 +350,7 @@ jobs:
       UNIVERSE: Bfr2016
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
       BATCH_INDEX: ${{ matrix.batch }}
-      TOTAL_BATCHES: "9"
+      TOTAL_BATCHES: "3"
       CREDENTIALS_BFR2016: "credentials_bfr2016.json"
       BROKSUM_DB_BFR2016: ${{ secrets.BROKSUM_DB_BROKER_BFR2016 }}
     steps:
