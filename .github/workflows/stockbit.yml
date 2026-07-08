@@ -51,6 +51,10 @@ on:
         description: 'Universe yang mau di-gap-scan (IDX/eIPO/Bfr2016/all)'
         required: false
         default: 'all'
+      skip_daily_fetch:
+        description: 'Skip wait-for-data + fetch-unified (true kalau cuma mau jalanin gap-scan/backfill sendiri, hindari dobel push hari ini) (true/false)'
+        required: false
+        default: 'false'
 
 env:
   FORCE_RUN: ${{ inputs.force_run || 'false' }}
@@ -117,6 +121,7 @@ jobs:
   wait-for-data:
     needs: check-bearer
     runs-on: ubuntu-latest
+    if: ${{ inputs.skip_daily_fetch != 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -141,6 +146,7 @@ jobs:
   fetch-unified:
     needs: [check-bearer, wait-for-data]
     runs-on: ubuntu-latest
+    if: ${{ inputs.skip_daily_fetch != 'true' }}
     strategy:
       matrix:
         batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
