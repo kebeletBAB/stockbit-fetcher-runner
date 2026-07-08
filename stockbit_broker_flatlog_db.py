@@ -165,6 +165,33 @@ HEADERS = {
     "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
 }
 
+# V1.2 (9 Jul 2026 FIX -- 429 crash saat gap-scan 9 batch paralel):
+# gc.open_by_key() TIDAK punya retry (beda dari get_or_create_tab/
+# push_rows_to_tab yang sudah ada), padahal ini juga API call ke Google
+# Sheets. Dengan 9 batch buka spreadsheet yang sama nyaris bersamaan
+# pakai 1 identitas kredensial per universe, gampang kena "429 Quota
+# exceeded -- Read requests per menit per user" dan CRASH TOTAL (exit
+# code 1, bukan retry). Root-cause sama persis dengan yang sudah
+# diperbaiki di stockbit_unified_daily.py V1.5.
+def open_by_key_with_retry(gc, ss_id):
+    # V1.3 (9 Jul 2026 FIX): ternyata bukan cuma 429 (quota) yang perlu
+    # retry -- gspread/Sheets API kadang balikin 500/503 (internal error
+    # transient di sisi Google, bukan soal kuota kita) terutama saat
+    # banyak proses baca bersamaan. Perlakukan sama seperti 429: retry
+    # dengan backoff, jangan langsung crash.
+    RETRYABLE = ("429", "500", "503")
+    for attempt in range(6):
+        try:
+            return gc.open_by_key(ss_id)
+        except gspread.exceptions.APIError as e:
+            if any(code in str(e) for code in RETRYABLE):
+                wait = (attempt + 1) * 20
+                print(f"  Error transient ({e}), tunggu {wait}s ...", flush=True)
+                time.sleep(wait)
+            else:
+                raise
+    raise Exception(f"Gagal buka spreadsheet {ss_id} setelah 6 percobaan (error transient terus)")
+
 def fmt_date(d):
     return d.strftime("%d/%m/%Y")
 
@@ -235,6 +262,14 @@ def extract_broker_rows(ticker, d, data):
 # GSPREAD OPERATIONS — pola sama dengan stockbit_broksum_db.py
 # ====================================================================
 
+RETRYABLE_CODES = ("429", "500", "503")
+
+def is_retryable(e):
+    """V1.3 (9 Jul 2026): dipakai di semua tempat yang retry gspread
+    APIError -- bukan cuma 429 (quota), tapi juga 500/503 (transient error
+    di sisi Google, sering muncul kalau banyak proses baca bersamaan)."""
+    return any(code in str(e) for code in RETRYABLE_CODES)
+
 def get_or_create_tab(spreadsheet, tab):
     for attempt in range(5):
         try:
@@ -246,9 +281,9 @@ def get_or_create_tab(spreadsheet, tab):
             print(f"  Tab baru dibuat: {tab}")
             return ws
         except gspread.exceptions.APIError as e:
-            if "429" in str(e):
+            if is_retryable(e):
                 wait = (attempt + 1) * 30
-                print(f"  Rate limit, tunggu {wait}s ...")
+                print(f"  Error transient ({e}), tunggu {wait}s ...", flush=True)
                 time.sleep(wait)
             else:
                 raise
@@ -265,9 +300,9 @@ def push_rows_to_tab(ws, rows):
                 time.sleep(0.5)
                 break
             except gspread.exceptions.APIError as e:
-                if "429" in str(e):
+                if is_retryable(e):
                     wait = (attempt + 1) * 30
-                    print(f"  Rate limit push, tunggu {wait}s ...")
+                    print(f"  Error transient push ({e}), tunggu {wait}s ...", flush=True)
                     time.sleep(wait)
                 else:
                     raise
@@ -345,7 +380,7 @@ class SpreadsheetRegistry:
 
     def _open(self, ss_id):
         if ss_id not in self.ss_cache:
-            self.ss_cache[ss_id] = self.gc.open_by_key(ss_id)
+            self.ss_cache[ss_id] = open_by_key_with_retry(self.gc, ss_id)
         return self.ss_cache[ss_id]
 
     def _cell_usage(self, ss):
@@ -360,9 +395,9 @@ class SpreadsheetRegistry:
                     total += ws.row_count * ws.col_count
                 return total
             except gspread.exceptions.APIError as e:
-                if "429" in str(e):
+                if is_retryable(e):
                     wait = (attempt + 1) * 20
-                    print(f"  [{self.universe}] Rate limit cek cell usage, tunggu {wait}s ...")
+                    print(f"  [{self.universe}] Error transient cek cell usage ({e}), tunggu {wait}s ...", flush=True)
                     time.sleep(wait)
                 else:
                     print(f"  [{self.universe}] Error cek cell usage: {e} -- skip cek, pakai file aktif")
@@ -650,9 +685,9 @@ def run_gap_scan(tickers_by_universe, registries):
                                     pass
                         break
                     except gspread.exceptions.APIError as e:
-                        if "429" in str(e):
+                        if is_retryable(e):
                             wait = (attempt + 1) * 30
-                            print(f"  Rate limit load tab {ws.title}, tunggu {wait}s ...")
+                            print(f"  Error transient load tab {ws.title} ({e}), tunggu {wait}s ...", flush=True)
                             time.sleep(wait)
                         else:
                             print(f"  Error load tab {ws.title}: {e}")
@@ -759,12 +794,12 @@ if __name__ == "__main__":
 
         cred_file = cred_keys[universe]
         if cred_file not in gc_cache:
-            print(f"Connecting ke Google Sheets pakai {cred_file} ...")
+            print(f"Connecting ke Google Sheets pakai {cred_file} ...", flush=True)
             gc_cache[cred_file] = gspread.service_account(filename=cred_file)
         gc = gc_cache[cred_file]
 
-        ss = gc.open_by_key(ss_id)
-        print(f"Connected: {ss.title} (tab broker: suffix _Broker, auto-rotate kalau cell limit)")
+        ss = open_by_key_with_retry(gc, ss_id)
+        print(f"Connected: {ss.title} (tab broker: suffix _Broker, auto-rotate kalau cell limit)", flush=True)
         registries[universe] = SpreadsheetRegistry(universe, gc, ss, YOUR_EMAIL_FOR_ROTATE, cred_file=cred_file)
 
     if not registries:
