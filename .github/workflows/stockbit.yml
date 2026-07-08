@@ -39,6 +39,10 @@ on:
         description: 'Jalankan backfill Broksum_DB 600 hari (true/false)'
         required: false
         default: 'false'
+      run_ohlc:
+        description: 'Jalankan fetch OHLC (yfinance -> OHLC_DB) juga (true/false)'
+        required: false
+        default: 'true'
 
 env:
   FORCE_RUN: ${{ inputs.force_run || 'false' }}
@@ -184,6 +188,7 @@ jobs:
   # ============================================================
   fetch-ohlc:
     runs-on: ubuntu-latest
+    if: ${{ inputs.run_ohlc != 'false' }}
     strategy:
       matrix:
         batch: [0, 1, 2]
