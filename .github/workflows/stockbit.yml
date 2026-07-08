@@ -112,7 +112,11 @@ jobs:
         env:
           BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
           FORCE_RUN: ${{ inputs.force_run || 'false' }}
-        run: python stockbit_broksum.py --wait-only
+          PYTHONUNBUFFERED: "1"
+        # -u = unbuffered, supaya print() muncul real-time di log GitHub
+        # Actions, bukan telat/nunggu buffer flush (lihat CHANGELOG FIX
+        # di wait_for_today_data(), stockbit_broksum.py)
+        run: python -u stockbit_broksum.py --wait-only
 
   # ============================================================
   # JOB 2: FETCH UNIFIED -> "10 Fungsi" + BROKSUM_DB (flat) +

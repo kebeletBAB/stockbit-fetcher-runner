@@ -377,18 +377,37 @@ def run(mode):
 
 
 def wait_for_today_data():
-    from datetime import date
-    today = date.today().strftime("%Y-%m-%d")
+    # FIX (9 Jul 2026): dua masalah dibenerin sekaligus --
+    # 1) "today" dulu pakai date.today() (timezone SERVER runner, biasanya
+    #    UTC di GitHub Actions), dibanding ke field API yang kemungkinan
+    #    berbasis WIB -- di jam-jam tertentu bisa beda tanggal padahal
+    #    data-nya sebenarnya sudah benar. Sekarang eksplisit pakai WIB,
+    #    sama seperti is_hari_bursa().
+    # 2) Perbandingan "data_date == today" itu EXACT STRING MATCH -- kalau
+    #    field API "from" ternyata bawa komponen jam/timezone (mis.
+    #    "2026-07-08T00:00:00Z", bukan cuma "2026-07-08"), ini TIDAK PERNAH
+    #    cocok walau datanya sudah update, bikin loop ini keliatan
+    #    "menggantung" sampai batas 30 menit. Sekarang ambil cuma 10
+    #    karakter pertama (YYYY-MM-DD) dari field API sebelum dibanding.
+    # 3) print(..., flush=True) eksplisit -- di GitHub Actions runner,
+    #    stdout Python di-buffer kalau tidak attached ke TTY, jadi baris
+    #    "Data masih..." bisa nggak muncul di log real-time meski loop-nya
+    #    jalan normal di baliknya (kelihatan seperti "menggantung" padahal
+    #    cuma output-nya yang telat tampil).
+    from datetime import timezone, timedelta
+    wib = timezone(timedelta(hours=7))
+    today = datetime.now(wib).date().strftime("%Y-%m-%d")
     for i in range(30):
         try:
             resp = fetch_stockbit("BBCA", "BROKER_SUMMARY_PERIOD_LATEST")
-            data_date = resp.get("data", {}).get("from", "")
+            data_date_raw = str(resp.get("data", {}).get("from", ""))
+            data_date = data_date_raw[:10]  # ambil "YYYY-MM-DD" doang, buang jam/timezone kalau ada
             if data_date == today:
-                print(f"✅ Data sudah update ke {today}")
+                print(f"✅ Data sudah update ke {today} (raw API: {data_date_raw!r})", flush=True)
                 return True
-            print(f"⏳ Data masih {data_date}, belum {today}. Tunggu 1 menit... ({i+1}/30)")
+            print(f"⏳ Data masih {data_date_raw!r} (dibaca sebagai {data_date}), belum {today}. Tunggu 1 menit... ({i+1}/30)", flush=True)
         except Exception as e:
-            print(f"⚠️ Error cek data: {e}")
+            print(f"⚠️ Error cek data: {e}", flush=True)
         time.sleep(60)
     return False
 
