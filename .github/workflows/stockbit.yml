@@ -1,4 +1,20 @@
 name: Stockbit Fetcher
+
+# ====================================================================
+# V2 (9 Jul 2026): job "fetch" (stockbit_broksum.py) dan "fetch-broksum-db"
+# (stockbit_broksum_db.py) DIGABUNG jadi satu job "fetch-unified" yang
+# panggil stockbit_unified_daily.py -- satu fetch per ticker per hari,
+# push ke "10 Fungsi" + BROKSUM_DB (flat) + BROKSUM_DB_*_Broker (flatlog)
+# sekaligus, plus hitung broker-count-5D (hari bursa aktual) buat Edge #3.
+#
+# PENTING -- "10 Fungsi" tetap jalan TANPA SYARAT (sama seperti dulu) meski
+# BROKSUM_DB (flat)/broker-registry belum lengkap untuk suatu universe;
+# lihat CHANGELOG V1.4 di stockbit_unified_daily.py.
+#
+# stockbit_ohlc_db.py (Yahoo Finance -> OHLC_DB) TIDAK disentuh -- sumber
+# data beda total, tidak bisa/perlu ikut konsolidasi ini.
+# ====================================================================
+
 on:
   schedule:
     - cron: '0 5 * * 1-5'
@@ -19,15 +35,8 @@ on:
         description: 'Jalankan backfill Broksum_DB 600 hari (true/false)'
         required: false
         default: 'false'
-      run_broksum_db:
-        description: 'Jalankan fetch Broksum_DB harian (true/false)'
-        required: false
-        default: 'false'
 
 env:
-  RUN_BROKSUM: "true"
-  RUN_PROFILE: "false"
-  RUN_BROKSUM_DB: ${{ inputs.run_broksum_db || 'false' }}
   FORCE_RUN: ${{ inputs.force_run || 'false' }}
   RUN_BACKFILL: ${{ inputs.run_backfill || 'false' }}
 
@@ -82,10 +91,12 @@ jobs:
         run: |
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="Bearer token aman! Mulai fetch 9 batch paralel..."
+            -d text="Bearer token aman! Mulai fetch unified 9 batch paralel..."
 
   # ============================================================
   # JOB 1.5: GATE - TUNGGU DATA SETTLE (SEKALI SAJA UNTUK SEMUA BATCH)
+  # tetap pakai stockbit_broksum.py --wait-only (cek generik "data sudah
+  # settle belum", tidak terkait script mana yang fetch datanya)
   # ============================================================
   wait-for-data:
     needs: check-bearer
@@ -104,9 +115,10 @@ jobs:
         run: python stockbit_broksum.py --wait-only
 
   # ============================================================
-  # JOB 2: FETCH BROKSUM -> GAS (existing, no change)
+  # JOB 2: FETCH UNIFIED -> "10 Fungsi" + BROKSUM_DB (flat) +
+  # BROKSUM_DB_*_Broker (flatlog), 9 batch paralel, SATU fetch per ticker.
   # ============================================================
-  fetch:
+  fetch-unified:
     needs: [check-bearer, wait-for-data]
     runs-on: ubuntu-latest
     strategy:
@@ -115,24 +127,38 @@ jobs:
       fail-fast: false
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       BATCH_INDEX: ${{ matrix.batch }}
       TOTAL_BATCHES: "9"
       FORCE_RUN: ${{ inputs.force_run || 'false' }}
+      MODE_DAILY: "1"
+      MODE_WEEKLY: "1"
+      MODE_MONTHLY: "1"
+      CREDENTIALS: "credentials.json"
+      CREDENTIALS_IDX: "credentials_idx.json"
+      CREDENTIALS_EIPO: "credentials_eipo.json"
+      CREDENTIALS_BFR2016: "credentials_bfr2016.json"
+      BROKSUM_DB_IDX: ${{ secrets.BROKSUM_DB_IDX }}
+      BROKSUM_DB_EIPO: ${{ secrets.BROKSUM_DB_EIPO }}
+      BROKSUM_DB_BFR2016: ${{ secrets.BROKSUM_DB_BFR2016 }}
+      BROKSUM_DB_BROKER_IDX: ${{ secrets.BROKSUM_DB_BROKER_IDX }}
+      BROKSUM_DB_BROKER_EIPO: ${{ secrets.BROKSUM_DB_BROKER_EIPO }}
+      BROKSUM_DB_BROKER_BFR2016: ${{ secrets.BROKSUM_DB_BROKER_BFR2016 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install requests
-      - name: Run Broksum (batch ${{ matrix.batch }})
-        if: env.RUN_BROKSUM == 'true'
-        run: python stockbit_broksum.py
-      - name: Run Profile (batch ${{ matrix.batch }})
-        if: env.RUN_PROFILE == 'true'
-        run: python stockbit_profile.py
+        run: pip install requests gspread
+      - name: Setup Google credentials (flat aggregate, shared)
+        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
+      - name: Setup Google credentials (broker-level, per universe)
+        run: |
+          echo "${{ secrets.GOOGLE_CREDENTIALS_IDX }}" | base64 -d > credentials_idx.json
+          echo "${{ secrets.GOOGLE_CREDENTIALS_EIPO }}" | base64 -d > credentials_eipo.json
+          echo "${{ secrets.GOOGLE_CREDENTIALS_BFR2016 }}" | base64 -d > credentials_bfr2016.json
+      - name: Run Unified Daily (batch ${{ matrix.batch }})
+        run: python stockbit_unified_daily.py
       - name: Upload error logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -142,43 +168,7 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================
-  # JOB 3: FETCH BROKSUM -> BROKSUM_DB (daily, 9 batch paralel)
-  # ============================================================
-  fetch-broksum-db:
-    needs: [check-bearer, wait-for-data]
-    runs-on: ubuntu-latest
-    if: ${{ inputs.run_broksum_db == 'true' }}
-    strategy:
-      matrix:
-        batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
-      fail-fast: false
-    env:
-      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
-      BROKSUM_DB_ID: ${{ secrets.BROKSUM_DB_ID }}
-      BATCH_INDEX: ${{ matrix.batch }}
-      TOTAL_BATCHES: "9"
-      MODE: "daily"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: pip install requests gspread
-      - name: Setup Google credentials
-        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
-      - name: Run Broksum DB daily (batch ${{ matrix.batch }})
-        run: python stockbit_broksum_db.py
-      - name: Upload error logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-log-db-batch-${{ matrix.batch }}
-          path: error_log_db_*.csv
-          if-no-files-found: ignore
-
-  # ============================================================
-  # JOB 4: BACKFILL GAS (existing, no change)
+  # JOB 3: BACKFILL GAS (existing, no change)
   # ============================================================
   backfill:
     needs: check-bearer
@@ -206,7 +196,9 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================
-  # JOB 5: BACKFILL BROKSUM_DB 600 HARI (manual trigger only)
+  # JOB 4: BACKFILL BROKSUM_DB 600 HARI (manual trigger only, existing,
+  # no change -- ini backfill flat aggregate lama, terpisah dari backfill
+  # broker-level yang dijalankan manual pakai stockbit_broker_flatlog_db.py)
   # ============================================================
   backfill-broksum-db:
     needs: check-bearer
@@ -214,7 +206,9 @@ jobs:
     if: ${{ inputs.run_broksum_db_backfill == 'true' }}
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
-      BROKSUM_DB_ID: ${{ secrets.BROKSUM_DB_ID }}
+      BROKSUM_DB_IDX: ${{ secrets.BROKSUM_DB_IDX }}
+      BROKSUM_DB_EIPO: ${{ secrets.BROKSUM_DB_EIPO }}
+      BROKSUM_DB_BFR2016: ${{ secrets.BROKSUM_DB_BFR2016 }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       MODE: "backfill"
@@ -237,10 +231,11 @@ jobs:
             -d text="Broksum DB backfill 600 hari selesai!"
 
   # ============================================================
-  # JOB 6: NOTIFY DONE
+  # JOB 5: NOTIFY DONE + RETRY (error log format baru: ticker,target,
+  # universe,ts,error -- lihat CHANGELOG V1.3 stockbit_unified_daily.py)
   # ============================================================
   notify-done:
-    needs: [check-bearer, wait-for-data, fetch, fetch-broksum-db, backfill, backfill-broksum-db]
+    needs: [check-bearer, wait-for-data, fetch-unified, backfill, backfill-broksum-db]
     runs-on: ubuntu-latest
     if: always()
     env:
@@ -248,13 +243,25 @@ jobs:
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GH_TOKEN: ${{ secrets.GH_PAT }}
+      CREDENTIALS: "credentials.json"
+      CREDENTIALS_IDX: "credentials_idx.json"
+      CREDENTIALS_EIPO: "credentials_eipo.json"
+      CREDENTIALS_BFR2016: "credentials_bfr2016.json"
+      BROKSUM_DB_IDX: ${{ secrets.BROKSUM_DB_IDX }}
+      BROKSUM_DB_EIPO: ${{ secrets.BROKSUM_DB_EIPO }}
+      BROKSUM_DB_BFR2016: ${{ secrets.BROKSUM_DB_BFR2016 }}
+      BROKSUM_DB_BROKER_IDX: ${{ secrets.BROKSUM_DB_BROKER_IDX }}
+      BROKSUM_DB_BROKER_EIPO: ${{ secrets.BROKSUM_DB_BROKER_EIPO }}
+      BROKSUM_DB_BROKER_BFR2016: ${{ secrets.BROKSUM_DB_BROKER_BFR2016 }}
+      MODE_WEEKLY: "0"
+      MODE_MONTHLY: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests gspread
       - name: Download all error logs
         uses: actions/download-artifact@v4
         with:
@@ -272,7 +279,7 @@ jobs:
           for f in glob.glob("error_logs/error_log_*.csv"):
               with open(f, newline="") as fp:
                   for row in csv.DictReader(fp):
-                      key = (row["ticker"], row["target"])
+                      key = (row["ticker"], row.get("target", ""))
                       if key not in seen:
                           seen.add(key)
                           all_errors.append(row)
@@ -284,15 +291,21 @@ jobs:
           with open("retry_queue.csv", "w", newline="") as f:
               w = csv.writer(f)
               for e in all_errors:
-                  w.writerow([e["ticker"], e["target"]])
+                  w.writerow([e["ticker"], e.get("target", "")])
 
           print(f"Retry queue: {len(all_errors)} ticker")
           PYEOF
+      - name: Setup Google credentials untuk retry
+        if: always()
+        run: |
+          echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
+          echo "${{ secrets.GOOGLE_CREDENTIALS_IDX }}" | base64 -d > credentials_idx.json
+          echo "${{ secrets.GOOGLE_CREDENTIALS_EIPO }}" | base64 -d > credentials_eipo.json
+          echo "${{ secrets.GOOGLE_CREDENTIALS_BFR2016 }}" | base64 -d > credentials_bfr2016.json
       - name: Run Retry
-        if: env.RUN_BROKSUM == 'true'
         run: |
           if [ -f retry_queue.csv ]; then
-            CSV_FILE=retry_queue.csv python stockbit_broksum.py
+            CSV_FILE=retry_queue.csv python stockbit_unified_daily.py
           fi
       - name: Notify Done
         run: |
