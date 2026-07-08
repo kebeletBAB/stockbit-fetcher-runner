@@ -47,6 +47,13 @@ Setup: SAMA seperti 3 script lama -- reuse credentials.json, BEARER_TOKEN,
   EIPO/BFR2016 (flat aggregate), broker_db_registry_{universe}.json (rotasi
   individual broker, dibuat otomatis kalau belum ada).
 
+V1.8 (9 Jul 2026 FIX -- timeout GAS "10 Fungsi"): push_to_gas() sekarang
+  retry inline 3x (5s/10s/20s) kalau timeout/error ke script.google.com --
+  banyak kasus timeout GAS itu sesaat (cold-start/antrian eksekusi), jadi
+  biasanya langsung sembuh di percobaan ke-2/3 tanpa perlu nunggu sampai
+  retry akhir workflow (job notify-done). Retry akhir tetap ada sebagai
+  fallback kalau GAS beneran down lebih lama dari 3x percobaan ini.
+
 V1.7 (9 Jul 2026 FIX -- root cause broker5D selalu None): window
   broker-count-5D DIPERBAIKI dari H0..H-4 (termasuk hari ini, pakai data
   live fetch) menjadi H-1..H-5 (5 hari bursa SEBELUM hari ini, murni dari
@@ -471,9 +478,26 @@ def transform_10fungsi(ticker, data, tab_id, broker_count_5d=None):
     }
 
 def push_to_gas(gas_url, payload):
-    resp = requests.post(gas_url, json=payload, timeout=30)
-    resp.raise_for_status()
-    return resp.text
+    """V1.8 (9 Jul 2026 FIX): tambah retry inline 3x (5s/10s/20s) buat
+    timeout/error sesaat ke GAS webhook (script.google.com sering lambat
+    cold-start / antrian eksekusi). Ini TIDAK menggantikan retry di akhir
+    workflow (job notify-done, lewat retry_queue.csv) -- keduanya jalan
+    bareng: retry inline ini nangkep kebanyakan kasus timeout SESAAT dalam
+    hitungan detik, sisanya (kalau GAS beneran down lama) tetap jatuh ke
+    error_log seperti biasa dan ditangkap retry di akhir seperti sebelumnya."""
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = requests.post(gas_url, json=payload, timeout=30)
+            resp.raise_for_status()
+            return resp.text
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                wait = (attempt + 1) * 5
+                print(f"(GAS gagal/timeout, retry {wait}s: {e}) ", end="", flush=True)
+                time.sleep(wait)
+    raise last_err
 
 # ====================================================================
 # TRANSFORM: BROKSUM_DB flat aggregate row (reuse broksum_db.py)
