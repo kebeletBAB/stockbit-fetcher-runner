@@ -280,17 +280,13 @@ jobs:
   gap-scan-idx:
     runs-on: ubuntu-latest
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'IDX' || inputs.gap_scan_universe == 'all') }}
-    strategy:
-      matrix:
-        batch: [0, 1, 2]
-      fail-fast: false
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
       MODE: gap_scan
       UNIVERSE: IDX
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
-      BATCH_INDEX: ${{ matrix.batch }}
-      TOTAL_BATCHES: "3"
+      BATCH_INDEX: "0"
+      TOTAL_BATCHES: "1"
       CREDENTIALS_IDX: "credentials_idx.json"
       BROKSUM_DB_IDX: ${{ secrets.BROKSUM_DB_BROKER_IDX }}
     steps:
@@ -302,7 +298,7 @@ jobs:
         run: pip install requests gspread
       - name: Setup Google credentials (broker-level IDX)
         run: echo "${{ secrets.GOOGLE_CREDENTIALS_IDX }}" | base64 -d > credentials_idx.json
-      - name: Run gap-scan IDX (batch ${{ matrix.batch }})
+      - name: Run gap-scan IDX
         env:
           PYTHONUNBUFFERED: "1"
         run: python -u stockbit_broker_flatlog_db.py
@@ -310,17 +306,13 @@ jobs:
   gap-scan-eipo:
     runs-on: ubuntu-latest
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'eIPO' || inputs.gap_scan_universe == 'all') }}
-    strategy:
-      matrix:
-        batch: [0, 1, 2]
-      fail-fast: false
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
       MODE: gap_scan
       UNIVERSE: eIPO
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
-      BATCH_INDEX: ${{ matrix.batch }}
-      TOTAL_BATCHES: "3"
+      BATCH_INDEX: "0"
+      TOTAL_BATCHES: "1"
       CREDENTIALS_EIPO: "credentials_eipo.json"
       BROKSUM_DB_EIPO: ${{ secrets.BROKSUM_DB_BROKER_EIPO }}
     steps:
@@ -332,7 +324,7 @@ jobs:
         run: pip install requests gspread
       - name: Setup Google credentials (broker-level eIPO)
         run: echo "${{ secrets.GOOGLE_CREDENTIALS_EIPO }}" | base64 -d > credentials_eipo.json
-      - name: Run gap-scan eIPO (batch ${{ matrix.batch }})
+      - name: Run gap-scan eIPO
         env:
           PYTHONUNBUFFERED: "1"
         run: python -u stockbit_broker_flatlog_db.py
@@ -340,17 +332,13 @@ jobs:
   gap-scan-bfr2016:
     runs-on: ubuntu-latest
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'Bfr2016' || inputs.gap_scan_universe == 'all') }}
-    strategy:
-      matrix:
-        batch: [0, 1, 2]
-      fail-fast: false
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
       MODE: gap_scan
       UNIVERSE: Bfr2016
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
-      BATCH_INDEX: ${{ matrix.batch }}
-      TOTAL_BATCHES: "3"
+      BATCH_INDEX: "0"
+      TOTAL_BATCHES: "1"
       CREDENTIALS_BFR2016: "credentials_bfr2016.json"
       BROKSUM_DB_BFR2016: ${{ secrets.BROKSUM_DB_BROKER_BFR2016 }}
     steps:
@@ -362,7 +350,7 @@ jobs:
         run: pip install requests gspread
       - name: Setup Google credentials (broker-level Bfr2016)
         run: echo "${{ secrets.GOOGLE_CREDENTIALS_BFR2016 }}" | base64 -d > credentials_bfr2016.json
-      - name: Run gap-scan Bfr2016 (batch ${{ matrix.batch }})
+      - name: Run gap-scan Bfr2016
         env:
           PYTHONUNBUFFERED: "1"
         run: python -u stockbit_broker_flatlog_db.py
