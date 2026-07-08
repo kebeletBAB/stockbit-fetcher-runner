@@ -149,6 +149,9 @@ jobs:
       CREDENTIALS_IDX: "credentials_idx.json"
       CREDENTIALS_EIPO: "credentials_eipo.json"
       CREDENTIALS_BFR2016: "credentials_bfr2016.json"
+      CREDENTIALS_FLAT_IDX: "credentials_flat_idx.json"
+      CREDENTIALS_FLAT_EIPO: "credentials_flat_eipo.json"
+      CREDENTIALS_FLAT_BFR2016: "credentials_flat_bfr2016.json"
       BROKSUM_DB_IDX: ${{ secrets.BROKSUM_DB_IDX }}
       BROKSUM_DB_EIPO: ${{ secrets.BROKSUM_DB_EIPO }}
       BROKSUM_DB_BFR2016: ${{ secrets.BROKSUM_DB_BFR2016 }}
@@ -162,13 +165,32 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install requests gspread
-      - name: Setup Google credentials (flat aggregate, shared)
+      - name: Setup Google credentials (flat aggregate, shared -- fallback)
         run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
       - name: Setup Google credentials (broker-level, per universe)
         run: |
           echo "${{ secrets.GOOGLE_CREDENTIALS_IDX }}" | base64 -d > credentials_idx.json
           echo "${{ secrets.GOOGLE_CREDENTIALS_EIPO }}" | base64 -d > credentials_eipo.json
           echo "${{ secrets.GOOGLE_CREDENTIALS_BFR2016 }}" | base64 -d > credentials_bfr2016.json
+      - name: Setup Google credentials (flat aggregate, per universe -- V1.6, quota splitting)
+        # Fallback ke GOOGLE_CREDENTIALS shared kalau secret per-universe belum dibuat,
+        # supaya code tetap jalan sebelum user selesai setup 3 service account baru.
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CREDENTIALS_FLAT_IDX }}" ]; then
+            echo "${{ secrets.GOOGLE_CREDENTIALS_FLAT_IDX }}" | base64 -d > credentials_flat_idx.json
+          else
+            cp credentials.json credentials_flat_idx.json
+          fi
+          if [ -n "${{ secrets.GOOGLE_CREDENTIALS_FLAT_EIPO }}" ]; then
+            echo "${{ secrets.GOOGLE_CREDENTIALS_FLAT_EIPO }}" | base64 -d > credentials_flat_eipo.json
+          else
+            cp credentials.json credentials_flat_eipo.json
+          fi
+          if [ -n "${{ secrets.GOOGLE_CREDENTIALS_FLAT_BFR2016 }}" ]; then
+            echo "${{ secrets.GOOGLE_CREDENTIALS_FLAT_BFR2016 }}" | base64 -d > credentials_flat_bfr2016.json
+          else
+            cp credentials.json credentials_flat_bfr2016.json
+          fi
       - name: Run Unified Daily (batch ${{ matrix.batch }})
         run: python stockbit_unified_daily.py
       - name: Upload error logs
@@ -195,7 +217,7 @@ jobs:
       fail-fast: false
     env:
       OHLC_DB_ID: ${{ secrets.OHLC_DB_ID }}
-      CREDENTIALS: "credentials.json"
+      CREDENTIALS: "credentials_ohlc.json"
       MODE: "daily"
       BATCH_INDEX: ${{ matrix.batch }}
       TOTAL_BATCHES: "3"
@@ -206,8 +228,17 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install yfinance gspread pandas
-      - name: Setup Google credentials
-        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
+      - name: Setup Google credentials (OHLC, dedicated service account -- quota terpisah dari flat/broker)
+        # V1.7: fallback ke GOOGLE_CREDENTIALS lama kalau secret GOOGLE_CREDENTIALS_OHLC
+        # belum dibuat, supaya tidak break sebelum user selesai setup akun baru.
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CREDENTIALS_OHLC }}" ]; then
+            echo "${{ secrets.GOOGLE_CREDENTIALS_OHLC }}" | base64 -d > credentials_ohlc.json
+            echo "Pakai kredensial OHLC dedicated."
+          else
+            echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials_ohlc.json
+            echo "GOOGLE_CREDENTIALS_OHLC belum diset, fallback ke GOOGLE_CREDENTIALS (shared)."
+          fi
       - name: Run OHLC DB daily (batch ${{ matrix.batch }})
         run: python stockbit_ohlc_db.py
 
@@ -291,6 +322,9 @@ jobs:
       CREDENTIALS_IDX: "credentials_idx.json"
       CREDENTIALS_EIPO: "credentials_eipo.json"
       CREDENTIALS_BFR2016: "credentials_bfr2016.json"
+      CREDENTIALS_FLAT_IDX: "credentials_flat_idx.json"
+      CREDENTIALS_FLAT_EIPO: "credentials_flat_eipo.json"
+      CREDENTIALS_FLAT_BFR2016: "credentials_flat_bfr2016.json"
       BROKSUM_DB_IDX: ${{ secrets.BROKSUM_DB_IDX }}
       BROKSUM_DB_EIPO: ${{ secrets.BROKSUM_DB_EIPO }}
       BROKSUM_DB_BFR2016: ${{ secrets.BROKSUM_DB_BFR2016 }}
@@ -346,6 +380,21 @@ jobs:
           echo "${{ secrets.GOOGLE_CREDENTIALS_IDX }}" | base64 -d > credentials_idx.json
           echo "${{ secrets.GOOGLE_CREDENTIALS_EIPO }}" | base64 -d > credentials_eipo.json
           echo "${{ secrets.GOOGLE_CREDENTIALS_BFR2016 }}" | base64 -d > credentials_bfr2016.json
+          if [ -n "${{ secrets.GOOGLE_CREDENTIALS_FLAT_IDX }}" ]; then
+            echo "${{ secrets.GOOGLE_CREDENTIALS_FLAT_IDX }}" | base64 -d > credentials_flat_idx.json
+          else
+            cp credentials.json credentials_flat_idx.json
+          fi
+          if [ -n "${{ secrets.GOOGLE_CREDENTIALS_FLAT_EIPO }}" ]; then
+            echo "${{ secrets.GOOGLE_CREDENTIALS_FLAT_EIPO }}" | base64 -d > credentials_flat_eipo.json
+          else
+            cp credentials.json credentials_flat_eipo.json
+          fi
+          if [ -n "${{ secrets.GOOGLE_CREDENTIALS_FLAT_BFR2016 }}" ]; then
+            echo "${{ secrets.GOOGLE_CREDENTIALS_FLAT_BFR2016 }}" | base64 -d > credentials_flat_bfr2016.json
+          else
+            cp credentials.json credentials_flat_bfr2016.json
+          fi
       - name: Run Retry
         run: |
           if [ -f retry_queue.csv ]; then

@@ -54,6 +54,26 @@ V1.3 (9 Jul 2026 -- untuk integrasi GitHub Actions/stockbit.yml):
     ticker,target) di job notify-done, biar ticker gagal bisa di-retry
     otomatis lewat CSV_FILE override, sama seperti workflow lama.
 
+V1.6 (9 Jul 2026 FIX -- kuota Google Sheets API "per user"): flat aggregate
+  (BROKSUM_DB_IDX/EIPO/BFR2016) sekarang bisa pakai service account
+  TERPISAH per universe (CREDENTIALS_FLAT_IDX/_EIPO/_BFR2016, opsional,
+  fallback ke CREDENTIALS kalau tidak diset). Root cause dikonfirmasi dari
+  GCP Console (APIs & Services -> Quotas): limit yang kena bukan project-
+  wide (300/menit, ~10% terpakai), tapi "Read requests per menit PER USER"
+  (60/menit PER SERVICE ACCOUNT) -- dulu 3 flat spreadsheet + OHLC_DB semua
+  numpuk ke 1 identitas (credentials.json) yang dipakai 9+3 batch paralel
+  sekaligus. Lihat juga CREDENTIALS_BROKER (V1.2) yang sudah lebih dulu
+  benar dipisah per universe untuk broker-level.
+
+V1.5 (9 Jul 2026 FIX -- ditemukan dari run pertama GitHub Actions, 9 batch
+  paralel): beberapa batch gagal dengan "429 Quota exceeded -- Read
+  requests per menit per user" (Google Sheets API) karena gc.open_by_key()
+  (baik di flat_spreadsheets maupun BrokerDbRegistry._open()) TIDAK punya
+  retry, beda dari get_or_create_tab/push_rows_to_tab yang sudah ada.
+  Ditambahkan: (1) open_by_key_with_retry() dengan backoff, dipakai di
+  kedua tempat itu; (2) stagger start kecil per BATCH_INDEX supaya 9 batch
+  tidak nembak API Google di detik yang sama persis.
+
 V1.4 (9 Jul 2026 FIX -- PENTING, ditemukan waktu susun stockbit.yml):
   - run_daily(): dulu kalau BROKSUM_DB(flat)/broker-registry belum diset
     untuk suatu universe, SELURUH universe itu di-skip TERMASUK push "10
@@ -115,6 +135,24 @@ CREDENTIALS_BROKER = {
     "IDX":     os.environ.get("CREDENTIALS_IDX", CREDENTIALS),
     "eIPO":    os.environ.get("CREDENTIALS_EIPO", CREDENTIALS),
     "Bfr2016": os.environ.get("CREDENTIALS_BFR2016", CREDENTIALS),
+}
+
+# V1.6 (9 Jul 2026 FIX -- kuota Google Sheets API): ditemukan dari GCP
+# Console (APIs & Services -> Quotas) bahwa limit yang kena bukan project-
+# wide (300 req/menit, cuma ~10% terpakai), tapi "Read requests per menit
+# PER USER" (60/menit PER SERVICE ACCOUNT). Dulu flat aggregate (3
+# spreadsheet BROKSUM_DB_IDX/EIPO/BFR2016) SEMUANYA pakai satu identitas
+# credentials.json yang SAMA -- dengan 9 batch paralel x 3 universe, bisa
+# sampai puluhan open_by_key() per menit numpuk ke satu jatah 60/menit itu.
+# Sekarang tiap universe (flat) bisa pakai service account SENDIRI (opsional
+# -- fallback ke CREDENTIALS kalau tidak diset, supaya tidak wajib bikin
+# service account baru buat yang belum sempat). Total sekarang bisa sampai
+# 7 identitas berbeda (3 flat + 3 broker + kelak 1 OHLC di luar file ini),
+# masing-masing dapat jatah 60/menit sendiri-sendiri.
+CREDENTIALS_FLAT = {
+    "IDX":     os.environ.get("CREDENTIALS_FLAT_IDX", CREDENTIALS),
+    "eIPO":    os.environ.get("CREDENTIALS_FLAT_EIPO", CREDENTIALS),
+    "Bfr2016": os.environ.get("CREDENTIALS_FLAT_BFR2016", CREDENTIALS),
 }
 
 MODE_DAILY   = os.environ.get("MODE_DAILY", "1") == "1"
@@ -477,6 +515,27 @@ def extract_broker_rows(ticker, d, data):
 # GSPREAD HELPERS (generik, dipakai buat flat & broker tab)
 # ====================================================================
 
+# V1.5 (9 Jul 2026 FIX): ditemukan waktu 9 batch GitHub Actions jalan
+# paralel bersamaan -- gc.open_by_key() TIDAK punya retry buat 429 (beda
+# dari get_or_create_tab/push_rows_to_tab di bawah yang sudah ada), padahal
+# ini juga API call ke Google Sheets. Dengan 9 proses buka spreadsheet yang
+# sama nyaris bersamaan (semua pakai credentials.json yang sama buat flat
+# aggregate), gampang kena "429 Quota exceeded -- Read requests per menit
+# per user" dari Google. Sekarang dibungkus retry+backoff, sama polanya
+# seperti fungsi lain di file ini.
+def open_by_key_with_retry(gc, ss_id):
+    for attempt in range(6):
+        try:
+            return gc.open_by_key(ss_id)
+        except gspread.exceptions.APIError as e:
+            if "429" in str(e):
+                wait = (attempt + 1) * 20
+                print(f"  Rate limit open_by_key, tunggu {wait}s ...")
+                time.sleep(wait)
+            else:
+                raise
+    raise Exception(f"Gagal buka spreadsheet {ss_id} setelah 6 percobaan (rate limit terus)")
+
 def get_or_create_tab(spreadsheet, tab, headers_row, rows_hint=5000):
     for attempt in range(5):
         try:
@@ -539,7 +598,7 @@ class BrokerDbRegistry:
 
     def _open(self, ss_id):
         if ss_id not in self.ss_cache:
-            self.ss_cache[ss_id] = self.gc.open_by_key(ss_id)
+            self.ss_cache[ss_id] = open_by_key_with_retry(self.gc, ss_id)
         return self.ss_cache[ss_id]
 
     def active(self):
@@ -821,6 +880,18 @@ if __name__ == "__main__":
         print("BEARER_TOKEN tidak diset!")
         exit(1)
 
+    # V1.5: stagger start antar batch -- kalau dijalankan sebagai matrix
+    # GitHub Actions (9 job paralel), semuanya start nyaris bersamaan dan
+    # langsung tembak Google Sheets API (open_by_key + preload_broker_index)
+    # di detik yang sama, gampang numpuk kena 429. Jeda kecil ini
+    # (BATCH_INDEX x beberapa detik) nyebar titik mulainya supaya nggak
+    # semua nembak API persis bareng -- TIDAK berpengaruh kalau dijalankan
+    # 1 proses lokal (BATCH_INDEX default 0 = tanpa jeda).
+    if BATCH_INDEX > 0:
+        stagger = BATCH_INDEX * 4
+        print(f"Stagger start: tunggu {stagger}s (batch {BATCH_INDEX}) ...")
+        time.sleep(stagger)
+
     print("Connecting ke Google Sheets ...")
     gc = gspread.service_account(filename=CREDENTIALS)
 
@@ -844,7 +915,11 @@ if __name__ == "__main__":
         if not ss_id:
             print(f"  BROKSUM_DB_{universe.upper()} (flat) tidak diset, skip {universe}")
             continue
-        flat_spreadsheets[universe] = gc.open_by_key(ss_id)
+        # V1.6: kredensial per-universe (kalau di-set) -- spread beban ke
+        # jatah kuota "per user" masing-masing identitas, bukan numpuk semua
+        # ke satu `gc` (credentials.json) yang juga dipakai 9 batch sekaligus.
+        gc_flat = _gc_for(CREDENTIALS_FLAT[universe])
+        flat_spreadsheets[universe] = open_by_key_with_retry(gc_flat, ss_id)
         print(f"Connected (flat): {universe}")
 
     broker_registries = {}
