@@ -574,18 +574,46 @@ def extract_broker_rows(ticker, d, data):
 # aggregate), gampang kena "429 Quota exceeded -- Read requests per menit
 # per user" dari Google. Sekarang dibungkus retry+backoff, sama polanya
 # seperti fungsi lain di file ini.
+# V1.11 (9 Jul 2026 FIX): bukan cuma 429 (quota) yang perlu retry --
+# gspread/Sheets API kadang balikin 500/503 (internal error transient di
+# sisi Google, bukan soal kuota) terutama saat banyak proses baca
+# bersamaan. Semua titik retry di bawah pakai helper ini sekarang, bukan
+# cuma cek "429" doang.
+RETRYABLE_CODES = ("429", "500", "503")
+
+def is_retryable(e):
+    return any(code in str(e) for code in RETRYABLE_CODES)
+
 def open_by_key_with_retry(gc, ss_id):
     for attempt in range(6):
         try:
             return gc.open_by_key(ss_id)
         except gspread.exceptions.APIError as e:
-            if "429" in str(e):
+            if is_retryable(e):
                 wait = (attempt + 1) * 20
-                print(f"  Rate limit open_by_key, tunggu {wait}s ...")
+                print(f"  Error transient open_by_key ({e}), tunggu {wait}s ...")
                 time.sleep(wait)
             else:
                 raise
-    raise Exception(f"Gagal buka spreadsheet {ss_id} setelah 6 percobaan (rate limit terus)")
+    raise Exception(f"Gagal buka spreadsheet {ss_id} setelah 6 percobaan (error transient terus)")
+
+# V1.10 (9 Jul 2026 FIX -- crash 429 di preload_broker_index): ss.worksheets()
+# TIDAK punya retry (beda dari open_by_key/get_or_create_tab/push_rows_to_tab
+# yang sudah dilindungi), padahal ini juga API call ke Google Sheets. Kena
+# 429 pas load index broker (H-1..H-5) langsung crash total, gak sampai
+# ke ticker manapun. Root cause sama persis polanya, cuma titik yang beda.
+def worksheets_with_retry(ss):
+    for attempt in range(6):
+        try:
+            return ss.worksheets()
+        except gspread.exceptions.APIError as e:
+            if is_retryable(e):
+                wait = (attempt + 1) * 20
+                print(f"  Error transient ss.worksheets() ({e}), tunggu {wait}s ...")
+                time.sleep(wait)
+            else:
+                raise
+    raise Exception(f"Gagal list worksheets {ss.title} setelah 6 percobaan (error transient terus)")
 
 def get_or_create_tab(spreadsheet, tab, headers_row, rows_hint=5000):
     for attempt in range(5):
@@ -597,9 +625,9 @@ def get_or_create_tab(spreadsheet, tab, headers_row, rows_hint=5000):
             print(f"  Tab baru dibuat: {tab}")
             return ws
         except gspread.exceptions.APIError as e:
-            if "429" in str(e):
+            if is_retryable(e):
                 wait = (attempt + 1) * 30
-                print(f"  Rate limit, tunggu {wait}s ...")
+                print(f"  Error transient ({e}), tunggu {wait}s ...")
                 time.sleep(wait)
             else:
                 raise
@@ -616,9 +644,9 @@ def push_rows_to_tab(ws, rows):
                 time.sleep(0.5)
                 break
             except gspread.exceptions.APIError as e:
-                if "429" in str(e):
+                if is_retryable(e):
                     wait = (attempt + 1) * 30
-                    print(f"  Rate limit push, tunggu {wait}s ...")
+                    print(f"  Error transient push ({e}), tunggu {wait}s ...")
                     time.sleep(wait)
                 else:
                     raise
@@ -672,7 +700,7 @@ def preload_broker_index(universe, registry, months_needed):
     index = {}
     tabs_needed = set(tab_name_broker(universe, m) for m in months_needed)
     for ss in registry.all_spreadsheets():
-        for ws in ss.worksheets():
+        for ws in worksheets_with_retry(ss):
             if ws.title not in tabs_needed:
                 continue
             print(f"  [preload] {universe}: load tab {ws.title} ...")
@@ -681,9 +709,9 @@ def preload_broker_index(universe, registry, months_needed):
                     rows = ws.get_all_values()
                     break
                 except gspread.exceptions.APIError as e:
-                    if "429" in str(e):
+                    if is_retryable(e):
                         wait = (attempt + 1) * 30
-                        print(f"    Rate limit, tunggu {wait}s ...")
+                        print(f"    Error transient ({e}), tunggu {wait}s ...")
                         time.sleep(wait)
                     else:
                         raise
