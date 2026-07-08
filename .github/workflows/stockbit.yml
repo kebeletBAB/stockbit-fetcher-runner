@@ -11,8 +11,12 @@ name: Stockbit Fetcher
 # BROKSUM_DB (flat)/broker-registry belum lengkap untuk suatu universe;
 # lihat CHANGELOG V1.4 di stockbit_unified_daily.py.
 #
-# stockbit_ohlc_db.py (Yahoo Finance -> OHLC_DB) TIDAK disentuh -- sumber
-# data beda total, tidak bisa/perlu ikut konsolidasi ini.
+# stockbit_ohlc_db.py (Yahoo Finance -> OHLC_DB) sumber datanya beda total
+# (yfinance, bukan Stockbit API) jadi TIDAK ikut dikonsolidasi ke
+# stockbit_unified_daily.py -- tapi karena TIDAK butuh BEARER_TOKEN atau
+# gate wait-for-data (bukan Stockbit), job-nya bisa jalan PARALEL, independen,
+# sejak awal workflow (lihat job "fetch-ohlc" di bawah) -- biasanya selesai
+# lebih cepat dari fetch-unified karena yfinance lebih ringan dari API Stockbit.
 # ====================================================================
 
 on:
@@ -172,6 +176,37 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================
+  # JOB 2.5: FETCH OHLC (Yahoo Finance -> OHLC_DB) -- TIDAK butuh
+  # BEARER_TOKEN atau gate wait-for-data (bukan Stockbit API), jadi jalan
+  # independen paralel sejak awal workflow. 3 batch cukup (yfinance jauh
+  # lebih ringan/cepat daripada fetch Stockbit, delay antar-saham 0.5s
+  # vs 1.5s dan cuma perlu 1 request per ticker per hari).
+  # ============================================================
+  fetch-ohlc:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        batch: [0, 1, 2]
+      fail-fast: false
+    env:
+      OHLC_DB_ID: ${{ secrets.OHLC_DB_ID }}
+      CREDENTIALS: "credentials.json"
+      MODE: "daily"
+      BATCH_INDEX: ${{ matrix.batch }}
+      TOTAL_BATCHES: "3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install yfinance gspread pandas
+      - name: Setup Google credentials
+        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
+      - name: Run OHLC DB daily (batch ${{ matrix.batch }})
+        run: python stockbit_ohlc_db.py
+
+  # ============================================================
   # JOB 3: BACKFILL GAS (existing, no change)
   # ============================================================
   backfill:
@@ -239,7 +274,7 @@ jobs:
   # universe,ts,error -- lihat CHANGELOG V1.3 stockbit_unified_daily.py)
   # ============================================================
   notify-done:
-    needs: [check-bearer, wait-for-data, fetch-unified, backfill, backfill-broksum-db]
+    needs: [check-bearer, wait-for-data, fetch-unified, fetch-ohlc, backfill, backfill-broksum-db]
     runs-on: ubuntu-latest
     if: always()
     env:
