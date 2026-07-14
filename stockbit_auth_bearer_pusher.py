@@ -125,6 +125,13 @@ def _wait_network(page, seconds=8):
     page.wait_for_timeout(seconds * 1000)
 
 
+def _debug_screenshot(page, log_dir: str, name: str):
+    try:
+        page.screenshot(path=os.path.join(log_dir, name))
+    except Exception as e:
+        print(f"   [DEBUG] Screenshot gagal ({name}): {e}")
+
+
 def login_stockbit(
     username: str | None = None,
     password: str | None = None,
@@ -167,6 +174,9 @@ def login_stockbit(
         page.goto("https://stockbit.com/feed", wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
         _dismiss_modal(page)
+        if debug_mode:
+            _debug_screenshot(page, log_dir, "debug_01_feed.png")
+            print(f"   [DEBUG] URL feed: {page.url}")
 
         already_logged_in = page.query_selector("text=LOG IN") is None and page.query_selector("text=Login") is None
 
@@ -174,6 +184,9 @@ def login_stockbit(
             print("   ✅ Sesi masih valid, tidak perlu login ulang.")
             page.goto("https://stockbit.com/symbol/IHSG", wait_until="domcontentloaded", timeout=30000)
             _wait_network(page, 8)
+            if debug_mode:
+                _debug_screenshot(page, log_dir, "debug_02_ihsg_session_reuse.png")
+                print(f"   [DEBUG] URL IHSG reuse: {page.url}")
             token = _find_valid_token(captured, debug=debug_mode)
 
             if not token:
@@ -194,7 +207,7 @@ def login_stockbit(
         _dismiss_modal(page)
 
         if debug_mode:
-            page.screenshot(path=os.path.join(log_dir, "debug_login_page.png"))
+            _debug_screenshot(page, log_dir, "debug_login_page.png")
             print(f"   [DEBUG] URL saat ini: {page.url}")
 
         for sel in ["input[type='email']", "input[name='username']", "input[name='email']",
@@ -227,6 +240,9 @@ def login_stockbit(
                 continue
 
         page.wait_for_timeout(3000)
+        if debug_mode:
+            _debug_screenshot(page, log_dir, "debug_03_after_submit.png")
+            print(f"   [DEBUG] URL setelah submit: {page.url}")
 
         otp_selectors = [
             "text=Verification Code",
@@ -283,6 +299,9 @@ def login_stockbit(
                     continue
 
             page.wait_for_timeout(3000)
+            if debug_mode:
+                _debug_screenshot(page, log_dir, "debug_04_after_otp.png")
+                print(f"   [DEBUG] URL setelah OTP: {page.url}")
 
         print("   → Menunggu token dari network ...")
         try:
@@ -299,12 +318,22 @@ def login_stockbit(
             pass
 
         _wait_network(page, 5)
+        if debug_mode:
+            _debug_screenshot(page, log_dir, "debug_05_before_token_scan.png")
+            print(f"   [DEBUG] URL sebelum scan token: {page.url}")
+            print(f"   [DEBUG] Kandidat request tertangkap: {len(captured.get('candidates', []))}")
+            sample = captured.get("candidates", [])[:3]
+            for i, tok in enumerate(sample, start=1):
+                print(f"   [DEBUG] Sample kandidat #{i}: {tok[:15]}...{tok[-8:]}")
+
         _find_valid_token(captured, debug=debug_mode)
 
         print(f"🍪 Profile Chrome tersimpan permanen → {profile_dir}")
         context.close()
 
     if not captured.get("token"):
+        if debug_mode:
+            print(f"   [DEBUG] Final kandidat token: {len(captured.get('candidates', []))}")
         raise RuntimeError(
             "Token tidak berhasil ditangkap.\n"
             "Cek credential atau coba lagi. Jalankan dengan DEBUG_LOGIN=true untuk detail."

@@ -102,3 +102,12 @@ jobs:
 
       - name: Refresh bearer & push secret
         run: python3 push_bearer_to_github.py
+
+      - name: Upload debug logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: refresh-bearer-debug-${{ inputs.account || 'primary' }}
+          path: |
+            logs/
+          if-no-files-found: ignore
