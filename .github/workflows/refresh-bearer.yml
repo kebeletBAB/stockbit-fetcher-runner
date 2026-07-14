@@ -95,10 +95,10 @@ jobs:
       - name: Install dependencies
         run: |
           pip install requests playwright
-          python -m playwright install chromium
+          python3 -m playwright install chromium
 
       - name: Validate gh auth
         run: gh auth status
 
       - name: Refresh bearer & push secret
-        run: python push_bearer_to_github.py
+        run: python3 push_bearer_to_github.py
