@@ -163,11 +163,19 @@ jobs:
   fetch-unified:
     needs: [check-bearer, wait-for-data]
     runs-on: ubuntu-latest
-    # always() -- supaya job ini TETAP jalan meski wait-for-data di-skip
-    # (kasus force_fetch_date diisi, lihat job wait-for-data). Kalau
-    # always() dipakai, harus manual cek check-bearer sukses (always()
-    # membatalkan auto-skip bawaan GitHub Actions kalau needs gagal/skip).
-    if: ${{ always() && needs.check-bearer.result == 'success' && inputs.skip_daily_fetch != 'true' }}
+    # V1.13 (14 Jul 2026 FIX): ganti always() -> !cancelled().
+    # always() dulu dipakai supaya job ini TETAP jalan meski wait-for-data
+    # di-skip (kasus force_fetch_date diisi) -- tapi always() juga MEMAKSA
+    # job ini start meski workflow run di-CANCEL manual (dokumentasi resmi
+    # GitHub Actions: always() bikin job/step jalan walau run di-cancel),
+    # dan juga TIDAK pernah mengecek hasil wait-for-data, jadi kalau
+    # wait-for-data GAGAL (mis. bearer 401) job ini tetap jalan penuh.
+    # !cancelled() punya efek sama seperti always() (bypass auto-skip kalau
+    # needs skip/gagal) TAPI tetap ikut berhenti kalau run di-cancel.
+    # Tambahan: sekarang eksplisit syaratkan wait-for-data 'success' ATAU
+    # 'skipped' (bukan 'failure'/'cancelled'), supaya bearer 401 di
+    # wait-for-data benar-benar menghentikan fetch-unified.
+    if: ${{ !cancelled() && needs.check-bearer.result == 'success' && (needs.wait-for-data.result == 'success' || needs.wait-for-data.result == 'skipped') && inputs.skip_daily_fetch != 'true' }}
     strategy:
       matrix:
         batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
@@ -449,7 +457,11 @@ jobs:
   notify-done:
     needs: [check-bearer, wait-for-data, fetch-unified, fetch-ohlc, backfill, backfill-broksum-db]
     runs-on: ubuntu-latest
-    if: always()
+    # V1.13 (14 Jul 2026 FIX): always() -> !cancelled(), sama alasan seperti
+    # fetch-unified -- always() memaksa job ini tetap start walau run
+    # sudah di-cancel manual, jadi "Cancel workflow" kelihatan tidak
+    # ngefek (masih ada job jalan sampai selesai).
+    if: ${{ !cancelled() }}
     env:
       BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
