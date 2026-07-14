@@ -475,3 +475,27 @@ Jika nanti lanjut implementasi, urutan kerja yang paling aman:
 3. baru tentukan apakah fallback Telegram dipertahankan dan diimplementasikan di repo ini atau dipisah
 4. lakukan hygiene secret dan dokumentasi
 
+## Update hasil implementasi sesudah audit
+
+Status terbaru sesudah audit ini:
+
+- repo kerja yang dipakai untuk implementasi adalah:
+  - `/home/fatih/Documents/Saham Indo/Python/stockbit-runner/stockbit-fetcher-runner`
+- workflow refresh bearer GitHub-native sudah dibuat
+- self-hosted runner sudah berjalan
+- refresh bearer dengan akun `primary` SUDAH BERHASIL
+
+Fakta operasional yang paling penting:
+
+- penyebab kegagalan awal bukan lagi kode capture token, tetapi browser/profile
+  yang belum trusted
+- saat memakai profile trusted lama:
+  - `/home/fatih/chrome-remote-profile-akun2`
+  refresh bearer berhasil penuh
+- profile `primary` pada runner dipakai lewat symlink ke profile trusted itu
+
+Implikasi:
+
+- baseline sukses saat ini bergantung pada reuse profile trusted
+- kalau profile ini hilang/direset/rusak, challenge approval HP kemungkinan
+  akan muncul lagi

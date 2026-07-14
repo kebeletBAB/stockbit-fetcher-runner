@@ -71,6 +71,27 @@ Workflow refresh menyimpan profile per akun di runner:
 
 Jangan hapus folder ini kecuali memang ingin paksa re-auth akun terkait.
 
+### Status tervalidasi saat ini
+
+Untuk akun `primary`, jalur yang SUDAH TERBUKTI berhasil adalah:
+
+- `primary` diarahkan ke profile trusted lama
+- path profile trusted:
+  - `/home/fatih/chrome-remote-profile-akun2`
+- profile `primary` di workflow saat ini dipakai lewat symlink:
+  - `/home/fatih/.stockbit-bearer/profiles/primary -> /home/fatih/chrome-remote-profile-akun2`
+
+Makna operasional:
+
+- approval HP hilang saat profile trusted ini dipakai
+- token bearer berhasil tertangkap
+- validasi token `200`
+- push ke GitHub Secret `BEARER_TOKEN` berhasil
+
+Jangan ganti, hapus, atau reset profile ini tanpa alasan yang jelas.
+Kalau profile ini rusak/hilang, kemungkinan besar login akan kembali minta
+approval manual di HP.
+
 ## Secrets GitHub yang dibutuhkan
 
 ### Wajib untuk refresh bearer
@@ -149,6 +170,15 @@ Jika OTP muncul di runner non-interaktif:
 
 Setelah profile akun pulih, run berikutnya diharapkan normal tanpa OTP.
 
+### Temuan tambahan penting
+
+Di akun `primary`, challenge yang sempat muncul ternyata bukan OTP email,
+melainkan approval manual via HP. Ini berarti:
+
+- masalah utamanya adalah trust/browser profile
+- profile trusted jauh lebih penting daripada sekadar username/password
+- automation penuh bergantung pada reuse profile yang sama
+
 ## Catatan workflow utama
 
 `stockbit.yml` sudah dirapikan agar:
@@ -168,4 +198,23 @@ Artinya sistem sekarang punya 2 producer:
 
 - producer otomatis: `refresh-bearer.yml`
 - producer manual: input `bearer` pada `stockbit.yml`
+
+## Catatan lanjutan untuk sesi berikutnya
+
+Jika nanti saya sendiri atau Claude melanjutkan pekerjaan ini, anggap hal-hal
+berikut sebagai baseline yang sudah terbukti:
+
+1. repo kerja yang benar:
+   - `/home/fatih/Documents/Saham Indo/Python/stockbit-runner/stockbit-fetcher-runner`
+2. workflow refresh yang dipakai:
+   - `.github/workflows/refresh-bearer.yml`
+3. akun yang sudah sukses:
+   - `primary`
+4. kunci sukses akun `primary`:
+   - symlink profile trusted ke `/home/fatih/chrome-remote-profile-akun2`
+5. jangan buru-buru refactor auth lagi kalau profile trusted ini masih jalan
+6. jika bearer refresh gagal lagi, cek dulu:
+   - apakah symlink profile `primary` masih benar
+   - apakah profile trusted sedang dipakai/ter-lock proses Chrome lain
+   - apakah challenge HP muncul lagi
 

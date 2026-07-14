@@ -98,6 +98,26 @@ ${HOME}/.stockbit-bearer/profiles/secondary
 
 Jangan arahkan HOME ke lokasi sementara.
 
+### Status aktual yang sudah terbukti sukses
+
+Saat ini akun `primary` TIDAK memakai folder profile baru kosong, tetapi memakai
+profile trusted lama lewat symlink:
+
+```text
+/home/fatih/.stockbit-bearer/profiles/primary -> /home/fatih/chrome-remote-profile-akun2
+```
+
+Ini penting karena profile trusted tersebut sudah lolos challenge approval HP
+dan berhasil dipakai untuk:
+
+- login Stockbit
+- tangkap bearer
+- validasi token
+- push `BEARER_TOKEN` ke GitHub Secret
+
+Kalau nanti runner atau workflow tiba-tiba gagal login lagi, cek symlink ini
+lebih dulu sebelum debugging yang lain.
+
 ## 5. Siapkan secrets GitHub
 
 Masuk ke repo GitHub:
@@ -182,6 +202,24 @@ Jika sukses:
 7. jalankan lagi dengan `trigger_fetch=true`
 8. jika perlu, set `force_fetch_run=true`
 
+### Smoke test yang sudah tervalidasi
+
+Run yang sudah terbukti sukses:
+
+- workflow: `Refresh Stockbit Bearer`
+- `account=primary`
+- `trigger_fetch=false`
+- `force_fetch_run=false`
+- `debug_login=true`
+
+Hasil sukses yang pernah teramati:
+
+- login masuk tanpa OTP
+- tidak minta approval HP lagi
+- 1 kandidat bearer tertangkap
+- validasi token `200`
+- GitHub Secret `BEARER_TOKEN` berhasil diperbarui
+
 ## 9. Jika OTP muncul
 
 Itu berarti profile akun itu belum trusted atau sudah rusak.
@@ -202,3 +240,20 @@ Jika refresh otomatis gagal:
 3. isi input `bearer`
 
 Itu tetap jalur fallback resmi.
+
+## 11. Catatan untuk kerja lintas sesi
+
+Supaya tidak bingung pada sesi berikutnya:
+
+- repo aktif yang benar adalah:
+  - `/home/fatih/Documents/Saham Indo/Python/stockbit-runner/stockbit-fetcher-runner`
+- profile trusted akun `primary` adalah:
+  - `/home/fatih/chrome-remote-profile-akun2`
+- symlink yang harus tetap ada:
+  - `/home/fatih/.stockbit-bearer/profiles/primary`
+- workflow refresh aktif:
+  - `.github/workflows/refresh-bearer.yml`
+
+Kalau nanti ada agen lain yang melanjutkan, mulai dari asumsi bahwa masalah
+path/file workflow sudah beres, dan baseline sukses sekarang bergantung pada
+profile trusted tersebut.
