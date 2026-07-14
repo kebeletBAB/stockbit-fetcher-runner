@@ -1,0 +1,104 @@
+name: Refresh Stockbit Bearer
+
+on:
+  schedule:
+    - cron: '50 4 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      account:
+        description: 'Akun bearer yang dipakai'
+        required: false
+        default: 'primary'
+        type: choice
+        options:
+          - primary
+          - secondary
+      trigger_fetch:
+        description: 'Trigger workflow fetch setelah refresh sukses (true/false)'
+        required: false
+        default: 'false'
+      force_fetch_run:
+        description: 'Kirim force_run=true saat trigger fetch (true/false)'
+        required: false
+        default: 'false'
+      debug_login:
+        description: 'DEBUG_LOGIN=true untuk screenshot/log login (true/false)'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: refresh-bearer
+  cancel-in-progress: false
+
+jobs:
+  refresh-bearer:
+    runs-on: [self-hosted, linux, stockbit-bearer]
+    env:
+      ACCOUNT: ${{ inputs.account || 'primary' }}
+      TRIGGER_FETCH_AFTER_REFRESH: ${{ inputs.trigger_fetch || 'false' }}
+      FORCE_FETCH_RUN: ${{ inputs.force_fetch_run || 'false' }}
+      DEBUG_LOGIN: ${{ inputs.debug_login || 'false' }}
+      TARGET_GH_REPO: ${{ github.repository }}
+      TARGET_GH_SECRET: BEARER_TOKEN
+      FETCH_WORKFLOW_FILE: stockbit.yml
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GH_TOKEN: ${{ secrets.GH_PAT }}
+      PRIMARY_USERNAME: ${{ secrets.STOCKBIT_PRIMARY_USERNAME }}
+      PRIMARY_PASSWORD: ${{ secrets.STOCKBIT_PRIMARY_PASSWORD }}
+      SECONDARY_USERNAME: ${{ secrets.STOCKBIT_SECONDARY_USERNAME }}
+      SECONDARY_PASSWORD: ${{ secrets.STOCKBIT_SECONDARY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Pilih akun & profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${ACCOUNT}" in
+            primary)
+              USERNAME="${PRIMARY_USERNAME}"
+              PASSWORD="${PRIMARY_PASSWORD}"
+              ACCOUNT_LABEL="primary"
+              ;;
+            secondary)
+              USERNAME="${SECONDARY_USERNAME}"
+              PASSWORD="${SECONDARY_PASSWORD}"
+              ACCOUNT_LABEL="secondary"
+              ;;
+            *)
+              echo "ACCOUNT tidak dikenal: ${ACCOUNT}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -z "${USERNAME}" ] || [ -z "${PASSWORD}" ]; then
+            echo "Credential kosong untuk account=${ACCOUNT}" >&2
+            exit 1
+          fi
+
+          PROFILE_ROOT="${HOME}/.stockbit-bearer/profiles"
+          PROFILE_DIR="${PROFILE_ROOT}/${ACCOUNT_LABEL}"
+          mkdir -p "${PROFILE_DIR}"
+
+          echo "::add-mask::${USERNAME}"
+          echo "::add-mask::${PASSWORD}"
+          echo "STOCKBIT_USERNAME=${USERNAME}" >> "${GITHUB_ENV}"
+          echo "STOCKBIT_PASSWORD=${PASSWORD}" >> "${GITHUB_ENV}"
+          echo "STOCKBIT_ACCOUNT_LABEL=${ACCOUNT_LABEL}" >> "${GITHUB_ENV}"
+          echo "STOCKBIT_PROFILE_DIR=${PROFILE_DIR}" >> "${GITHUB_ENV}"
+
+      - name: Install dependencies
+        run: |
+          pip install requests playwright
+          python -m playwright install chromium
+
+      - name: Validate gh auth
+        run: gh auth status
+
+      - name: Refresh bearer & push secret
+        run: python push_bearer_to_github.py
