@@ -257,3 +257,22 @@ Supaya tidak bingung pada sesi berikutnya:
 Kalau nanti ada agen lain yang melanjutkan, mulai dari asumsi bahwa masalah
 path/file workflow sudah beres, dan baseline sukses sekarang bergantung pada
 profile trusted tersebut.
+
+## 12. SOP singkat saat token expired / refresh gagal
+
+Ringkasnya:
+
+1. jalankan manual `Refresh Stockbit Bearer`
+2. bila sukses, ulangi `Stockbit Fetcher`
+3. bila gagal, cek symlink profile `primary`
+4. bila challenge HP/OTP muncul, selesaikan challenge akun itu
+5. bila perlu update sheet segera, pakai fallback manual input `bearer`
+
+Fallback manual tercepat:
+
+- login manual ke Stockbit
+- ambil bearer
+- jalankan `Stockbit Fetcher`
+- isi field `bearer`
+- set `force_run=true` bila perlu
+

@@ -218,3 +218,84 @@ berikut sebagai baseline yang sudah terbukti:
    - apakah profile trusted sedang dipakai/ter-lock proses Chrome lain
    - apakah challenge HP muncul lagi
 
+## SOP singkat saat token expired / refresh gagal
+
+Gunakan urutan ini. Jangan lompat-lompat debug.
+
+### Kasus A: workflow `Refresh Stockbit Bearer` sukses
+
+Tidak perlu tindakan apa-apa.
+
+Artinya:
+- token baru sudah dibuat
+- `BEARER_TOKEN` di GitHub Secret sudah diperbarui
+- workflow fetch berikutnya tinggal memakai token itu
+
+### Kasus B: workflow `Refresh Stockbit Bearer` gagal
+
+Cek berurutan:
+
+1. cek runner masih online di GitHub
+2. cek symlink profile `primary` masih benar:
+   - `/home/fatih/.stockbit-bearer/profiles/primary -> /home/fatih/chrome-remote-profile-akun2`
+3. cek profile trusted tidak sedang dipakai/ter-lock proses Chrome lain
+4. cek apakah Stockbit meminta challenge manual lagi:
+   - approval HP
+   - OTP
+5. cek log workflow `Refresh Stockbit Bearer`
+
+### Kasus C: token expired dan fetch gagal di `check-bearer`
+
+Jangan debug fetch dulu.
+
+Anggap masalahnya ada di producer token dulu, yaitu refresh bearer.
+
+Urutan tindakan:
+
+1. coba jalankan manual workflow `Refresh Stockbit Bearer`
+   - `account=primary`
+   - `trigger_fetch=false`
+   - `debug_login=true`
+2. kalau refresh sukses, jalankan `Stockbit Fetcher` lagi
+3. kalau refresh gagal, pakai fallback manual bearer
+
+### Fallback manual tercepat
+
+Kalau sedang butuh update Google Sheets secepat mungkin:
+
+1. login manual ke Stockbit dari browser
+2. ambil bearer token
+3. jalankan workflow `Stockbit Fetcher` via `workflow_dispatch`
+4. isi field `bearer` dengan token baru
+5. set `force_run=true` bila perlu paksa jalan hari itu
+
+Ini adalah jalur cadangan resmi bila refresh otomatis gagal.
+
+### Command cepat di mesin runner
+
+Cek symlink profile:
+
+```bash
+ls -lah /home/fatih/.stockbit-bearer/profiles
+```
+
+Cek proses Chrome aktif:
+
+```bash
+ps -ef | grep -i chrome | grep -v grep
+```
+
+Cek file debug lokal dari repo runner:
+
+```bash
+cd /home/fatih/actions-runner-stockbit-bearer/_work/stockbit-fetcher-runner/stockbit-fetcher-runner
+find logs -type f | sort
+```
+
+### Prinsip penting
+
+- token expired itu normal
+- yang paling penting adalah workflow refresh masih bisa login
+- jika refresh gagal, perbaiki jalur refresh atau pakai fallback manual
+- jangan buang waktu debug Google Sheets kalau bearer producer-nya belum sehat
+
