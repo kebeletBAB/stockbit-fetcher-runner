@@ -276,3 +276,21 @@ Fallback manual tercepat:
 - isi field `bearer`
 - set `force_run=true` bila perlu
 
+## 13. Catatan sinkronisasi workflow harian
+
+Mulai 16 Juli 2026, workflow harian di repo ini juga punya aturan baru:
+
+- `fetch-ohlc` ikut digate oleh `wait-for-data`
+- jadi OHLC tidak lagi boleh menulis lebih dulu saat data harian Stockbit
+  belum settle
+
+Tujuannya:
+
+- menghindari kondisi `fetch-unified` tertahan tapi OHLC sudah update hari itu
+- menjaga Google Sheets harian tetap konsisten antar job
+
+Praktiknya:
+
+- kalau `wait-for-data` gagal atau belum `success`, `fetch-ohlc` tidak jalan
+- kalau `force_fetch_date` dipakai, `fetch-ohlc` di-skip dulu
+

@@ -299,3 +299,26 @@ find logs -type f | sort
 - jika refresh gagal, perbaiki jalur refresh atau pakai fallback manual
 - jangan buang waktu debug Google Sheets kalau bearer producer-nya belum sehat
 
+## Catatan workflow harian per 16 Jul 2026
+
+Mulai 16 Juli 2026:
+
+- `fetch-ohlc` TIDAK lagi jalan independen sejak awal workflow
+- `fetch-ohlc` sekarang ikut menunggu `wait-for-data`
+- alasannya: supaya OHLC tidak keburu menulis tanggal hari ini ke Google
+  Sheets saat `fetch-unified` masih tertahan karena data Stockbit belum
+  settle
+
+Implikasi operasional:
+
+- kalau `wait-for-data` belum `success`, maka:
+  - `fetch-unified` tidak jalan
+  - `fetch-ohlc` juga tidak jalan
+- ini disengaja agar semua update harian tetap sinkron
+
+Catatan tambahan:
+
+- saat `force_fetch_date` dipakai, `fetch-ohlc` sekarang di-skip dulu
+- alasannya: `stockbit_ohlc_db.py` masih memakai `date.today()` dan belum
+  punya `TARGET_DATE` manual, jadi belum aman dipaksa sinkron ke tanggal lain
+

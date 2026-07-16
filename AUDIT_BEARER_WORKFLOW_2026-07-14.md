@@ -499,3 +499,14 @@ Implikasi:
 - baseline sukses saat ini bergantung pada reuse profile trusted
 - kalau profile ini hilang/direset/rusak, challenge approval HP kemungkinan
   akan muncul lagi
+
+Update tambahan per 16 Juli 2026:
+
+- workflow harian `.github/workflows/stockbit.yml` diubah lagi supaya
+  `fetch-ohlc` ikut menunggu `wait-for-data`
+- alasan perubahan ini: sebelumnya `fetch-ohlc` bisa tetap jalan dan menulis
+  Google Sheets lebih dulu saat `fetch-unified` tertahan karena data Stockbit
+  belum settle
+- sekarang perilakunya disinkronkan:
+  - `wait-for-data` belum sukses -> `fetch-unified` tidak jalan
+  - `wait-for-data` belum sukses -> `fetch-ohlc` juga tidak jalan
