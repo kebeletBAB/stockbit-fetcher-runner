@@ -322,3 +322,77 @@ Catatan tambahan:
 - alasannya: `stockbit_ohlc_db.py` masih memakai `date.today()` dan belum
   punya `TARGET_DATE` manual, jadi belum aman dipaksa sinkron ke tanggal lain
 
+## Diagram alur singkat
+
+```text
+[Self-hosted runner ON]
+          |
+          v
+[Refresh Stockbit Bearer]
+  - pakai akun primary
+  - pakai profile trusted:
+    /home/fatih/chrome-remote-profile-akun2
+  - tangkap bearer baru
+  - validasi token
+  - update GitHub Secret BEARER_TOKEN
+          |
+          v
+[Stockbit Fetcher]
+  - check-bearer
+  - wait-for-data
+          |
+          +--> kalau data BELUM settle:
+          |      - fetch-unified tidak jalan
+          |      - fetch-ohlc tidak jalan
+          |
+          +--> kalau data SUDAH settle:
+                 - fetch-unified jalan
+                 - fetch-ohlc jalan
+                 - Google Sheets update sinkron
+```
+
+## Diagram keputusan saat ada masalah
+
+```text
+[Refresh Stockbit Bearer gagal]
+          |
+          v
+Cek runner online?
+          |
+          +--> tidak -> hidupkan/perbaiki runner
+          |
+          +--> ya -> cek symlink profile primary
+                        |
+                        +--> salah/rusak -> perbaiki symlink/profile
+                        |
+                        +--> benar -> cek apakah Stockbit minta approval HP/OTP
+                                      |
+                                      +--> ya -> selesaikan challenge manual
+                                      |
+                                      +--> tidak -> cek log/debug workflow
+```
+
+## Diagram fallback tercepat
+
+```text
+[Perlu update sheet hari ini, tapi refresh gagal]
+          |
+          v
+Login manual ke Stockbit
+          |
+          v
+Ambil bearer token
+          |
+          v
+Run workflow Stockbit Fetcher manual
+          |
+          v
+Isi field `bearer`
+          |
+          v
+Set `force_run=true` bila perlu
+          |
+          v
+Google Sheets tetap bisa diupdate
+```
+
