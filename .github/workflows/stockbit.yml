@@ -23,10 +23,13 @@ concurrency:
 #
 # stockbit_ohlc_db.py (Yahoo Finance -> OHLC_DB) sumber datanya beda total
 # (yfinance, bukan Stockbit API) jadi TIDAK ikut dikonsolidasi ke
-# stockbit_unified_daily.py -- tapi karena TIDAK butuh BEARER_TOKEN atau
-# gate wait-for-data (bukan Stockbit), job-nya bisa jalan PARALEL, independen,
-# sejak awal workflow (lihat job "fetch-ohlc" di bawah) -- biasanya selesai
-# lebih cepat dari fetch-unified karena yfinance lebih ringan dari API Stockbit.
+# stockbit_unified_daily.py. TAPI secara operasional kita TETAP sinkronkan
+# dengan gate wait-for-data, karena kalau cron datang terlalu cepat sebelum
+# data harian settle, fetch-unified tertahan tapi OHLC bisa keburu menulis
+# tanggal hari ini ke Google Sheets. Jadi mulai 16 Jul 2026, fetch-ohlc ikut
+# menunggu wait-for-data sukses. Kalau force_fetch_date dipakai, fetch-ohlc
+# sengaja di-skip dulu karena stockbit_ohlc_db.py masih pakai date.today()
+# dan belum punya TARGET_DATE eksplisit.
 # ====================================================================
 
 on:
@@ -248,15 +251,16 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================
-  # JOB 2.5: FETCH OHLC (Yahoo Finance -> OHLC_DB) -- TIDAK butuh
-  # BEARER_TOKEN atau gate wait-for-data (bukan Stockbit API), jadi jalan
-  # independen paralel sejak awal workflow. 3 batch cukup (yfinance jauh
-  # lebih ringan/cepat daripada fetch Stockbit, delay antar-saham 0.5s
-  # vs 1.5s dan cuma perlu 1 request per ticker per hari).
+  # JOB 2.5: FETCH OHLC (Yahoo Finance -> OHLC_DB) -- sumber beda,
+  # tetapi mulai 16 Jul 2026 tetap DIGATE oleh wait-for-data supaya tidak
+  # keburu menulis tanggal hari ini saat fetch-unified masih tertahan karena
+  # data Stockbit belum settle. Kalau force_fetch_date dipakai, job ini
+  # di-skip dulu karena stockbit_ohlc_db.py belum punya TARGET_DATE manual.
   # ============================================================
   fetch-ohlc:
+    needs: wait-for-data
     runs-on: ubuntu-latest
-    if: ${{ inputs.run_ohlc != 'false' }}
+    if: ${{ !cancelled() && inputs.run_ohlc != 'false' && inputs.skip_daily_fetch != 'true' && inputs.force_fetch_date == '' && needs.wait-for-data.result == 'success' }}
     strategy:
       matrix:
         batch: [0, 1, 2]
