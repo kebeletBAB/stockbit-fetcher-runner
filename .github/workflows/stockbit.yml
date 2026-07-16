@@ -31,7 +31,7 @@ concurrency:
 
 on:
   schedule:
-    - cron: '0 5 * * 1-5'
+    - cron: '30 7 * * 1-5'
   workflow_dispatch:
     inputs:
       bearer:
