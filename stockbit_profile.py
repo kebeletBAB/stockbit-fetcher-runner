@@ -175,7 +175,10 @@ def convert_shareholder_date(date_str):
 # FETCH API STOCKBIT
 # ====================================================================
 def fetch_profile(ticker):
-    url = f"https://exodus.stockbit.com/emitten/{ticker}/profile"
+    # Stockbit web app now calls /emitten/<ticker>/info for symbol profile data.
+    # The old /profile endpoint can return 401 even when the bearer is valid for
+    # marketdetectors/market-mover endpoints.
+    url = f"https://exodus.stockbit.com/emitten/{ticker}/info"
     resp = requests.get(url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
     return resp.json()
@@ -285,6 +288,9 @@ def run():
             w.writeheader()
             w.writerows(error_log)
         print(f"Error log disimpan: {err_file}")
+
+        if len(error_log) >= len(rows):
+            raise SystemExit("Semua ticker profile gagal diproses; workflow ditandai gagal agar tidak false-success.")
 
 
 if __name__ == "__main__":

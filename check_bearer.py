@@ -23,7 +23,7 @@ try:
         "?transaction_type=TRANSACTION_TYPE_NET"
         "&market_board=MARKET_BOARD_REGULER"
         "&investor_type=INVESTOR_TYPE_ALL"
-        "&limit=1"
+        "&limit=25"
         "&period=BROKER_SUMMARY_PERIOD_LATEST",
         headers=headers,
         timeout=10

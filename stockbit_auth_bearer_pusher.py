@@ -68,23 +68,39 @@ def _default_cdp_profile_dir(account_label: str) -> str:
 
 
 def _validate_token(token: str, verbose: bool = False) -> bool:
-    try:
-        resp = requests.get(
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "authorization": f"Bearer {token}",
+        "origin": "https://stockbit.com",
+        "referer": "https://stockbit.com/",
+        "x-platform": "web",
+        "user-agent": _USER_AGENT,
+    }
+    urls = [
+        (
+            "market-mover",
             "https://exodus.stockbit.com/order-trade/market-mover"
             "?mover_type=MOVER_TYPE_TOP_GAINER&filter_stocks=FILTER_STOCKS_TYPE_MAIN_BOARD",
-            headers={
-                "accept": "application/json, text/plain, */*",
-                "authorization": f"Bearer {token}",
-                "origin": "https://stockbit.com",
-                "referer": "https://stockbit.com/",
-                "x-platform": "web",
-                "user-agent": _USER_AGENT,
-            },
-            timeout=10,
-        )
-        if verbose:
-            print(f"   [DEBUG] Validate → status={resp.status_code}, body={resp.text[:200]}")
-        return resp.status_code == 200
+        ),
+        (
+            "marketdetectors",
+            "https://exodus.stockbit.com/marketdetectors/BBCA"
+            "?transaction_type=TRANSACTION_TYPE_NET"
+            "&market_board=MARKET_BOARD_REGULER"
+            "&investor_type=INVESTOR_TYPE_ALL"
+            "&limit=25"
+            "&period=BROKER_SUMMARY_PERIOD_LATEST",
+        ),
+    ]
+
+    try:
+        for label, url in urls:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if verbose:
+                print(f"   [DEBUG] Validate {label} → status={resp.status_code}, body={resp.text[:200]}")
+            if resp.status_code != 200:
+                return False
+        return True
     except Exception as e:
         if verbose:
             print(f"   [DEBUG] Validate → EXCEPTION: {e}")
