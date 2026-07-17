@@ -38,7 +38,6 @@ jobs:
       TRIGGER_FETCH_AFTER_REFRESH: ${{ inputs.trigger_fetch || 'false' }}
       FORCE_FETCH_RUN: ${{ inputs.force_fetch_run || 'false' }}
       DEBUG_LOGIN: ${{ inputs.debug_login || 'false' }}
-      SECONDARY_CDP_URL: ${{ secrets.STOCKBIT_SECONDARY_CDP_URL }}
       TARGET_GH_REPO: ${{ github.repository }}
       TARGET_GH_SECRET: BEARER_TOKEN
       FETCH_WORKFLOW_FILE: stockbit.yml
@@ -71,7 +70,7 @@ jobs:
               USERNAME="${SECONDARY_USERNAME}"
               PASSWORD="${SECONDARY_PASSWORD}"
               ACCOUNT_LABEL="secondary"
-              CDP_URL="${SECONDARY_CDP_URL}"
+              CDP_URL="http://127.0.0.1:9225"
               ;;
             *)
               echo "ACCOUNT tidak dikenal: ${ACCOUNT}" >&2
