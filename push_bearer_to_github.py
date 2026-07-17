@@ -94,8 +94,9 @@ def main():
     except Exception as e:
         msg = f"Gagal ambil bearer token baru: {e}"
         print(f"[ERROR] {msg}")
-        kirim_telegram(f"🚨 <b>Push bearer GAGAL (login)</b>\n{msg}")
-        sys.exit(1)
+        if os.environ.get("SUPPRESS_LOGIN_FAILURE_TELEGRAM", "false").lower() != "true":
+            kirim_telegram(f"🚨 <b>Push bearer GAGAL (login)</b>\n{msg}")
+        sys.exit(10)
 
     env = gh_env()
     print(f"Push ke GitHub secret {SECRET_NAME} @ {REPO} ...")
@@ -106,7 +107,7 @@ def main():
             f"🚨 <b>Push bearer GAGAL (gh secret set)</b>\n"
             f"Cek auth GitHub/token untuk service {SERVICE_NAME}."
         )
-        sys.exit(1)
+        sys.exit(20)
 
     print("✅ Bearer token berhasil di-push ke GitHub Secret.")
 
@@ -117,7 +118,7 @@ def main():
                 f"⚠️ <b>Bearer refresh sukses, trigger fetch gagal</b>\n"
                 f"Akun: {ACCOUNT_LABEL}\nRepo: {REPO}"
             )
-            sys.exit(1)
+            sys.exit(30)
         kirim_telegram(
             f"✅ <b>Bearer refresh + trigger fetch sukses</b>\n"
             f"Akun: {ACCOUNT_LABEL}\nRepo: {REPO}"
