@@ -162,7 +162,26 @@ def login_stockbit(
         context = p.chromium.launch_persistent_context(
             profile_dir,
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            # --password-store=basic: Chrome di Linux normalnya enkripsi
+            # cookies pakai kunci dari OS keyring (GNOME Keyring/libsecret,
+            # via DBUS session desktop). Runner self-hosted yang dipicu dari
+            # terminal/tmux ./run.sh TIDAK selalu punya DBUS_SESSION_BUS_ADDRESS
+            # yang valid ke session desktop -- jadi walau profile & sesi
+            # trusted-nya valid (terbukti: login manual via Chrome asli di
+            # desktop sukses TANPA approval HP), Playwright headless tetap
+            # gagal decrypt cookies dan selalu lihat "belum login". Ini cocok
+            # dengan gejala: gagal identik berulang kali meski sudah approve
+            # HP manual. Flag ini bikin Chrome pakai kunci enkripsi statis,
+            # tidak bergantung keyring OS sama sekali -- konsisten dipakai
+            # headless/non-desktop-session. Konsekuensi: profile yang ada
+            # sekarang perlu SEKALI login ulang (kemungkinan minta approval
+            # HP sekali lagi) supaya cookies-nya ke-encode ulang pakai mode
+            # basic ini; setelah itu run berikutnya seharusnya konsisten.
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--password-store=basic",
+            ],
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                        "Chrome/125.0.0.0 Safari/537.36",
         )
@@ -239,7 +258,32 @@ def login_stockbit(
             except Exception:
                 continue
 
-        page.wait_for_timeout(3000)
+        # V3 (17 Jul 2026 FIX): dulu cuma tunggu 3 detik lalu langsung
+        # nyerah kalau masih di /login -- padahal kalau Stockbit minta
+        # approval manual via HP (bukan OTP email), orangnya butuh waktu
+        # buka HP dan tap approve, jelas lebih dari 3 detik. Sekarang
+        # polling sampai APPROVAL_WAIT_SECONDS (default 20 detik, bisa
+        # di-override env), berhenti lebih awal begitu URL sudah pindah
+        # dari /login (approval granted) atau token sudah tertangkap.
+        approval_wait_seconds = int(os.environ.get("APPROVAL_WAIT_SECONDS", "20"))
+        poll_interval_ms = 2000
+        elapsed_ms = 0
+        while elapsed_ms < approval_wait_seconds * 1000:
+            page.wait_for_timeout(poll_interval_ms)
+            elapsed_ms += poll_interval_ms
+            still_on_login = "/login" in page.url
+            has_token = bool(captured.get("candidates"))
+            if debug_mode:
+                print(f"   [DEBUG] Nunggu approval/redirect ... {elapsed_ms // 1000}s "
+                      f"(URL: {page.url}, token kandidat: {len(captured.get('candidates', []))})")
+            if not still_on_login or has_token:
+                print(f"   → Terdeteksi progres setelah {elapsed_ms // 1000}s "
+                      f"(redirect dari /login atau token tertangkap)")
+                break
+        else:
+            print(f"   ⚠️  Masih di halaman login setelah {approval_wait_seconds}s "
+                  f"-- kalau ini gara-gara approval HP, mungkin belum sempat di-tap.")
+
         if debug_mode:
             _debug_screenshot(page, log_dir, "debug_03_after_submit.png")
             print(f"   [DEBUG] URL setelah submit: {page.url}")
