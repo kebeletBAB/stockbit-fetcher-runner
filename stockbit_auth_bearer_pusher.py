@@ -159,31 +159,35 @@ def login_stockbit(
     captured = {"token": None, "candidates": []}
 
     with sync_playwright() as p:
+        # V4 (17 Jul 2026 FIX): screenshot debug membuktikan login form
+        # SUKSES di-submit tapi Stockbit diam-diam menolak (redirect ke
+        # homepage sebagai guest, tanpa pesan error) -- padahal kredensial
+        # sudah dipastikan valid manual. Ini pola khas anti-bot/fingerprint
+        # detection terhadap headless Chromium bawaan Playwright, BUKAN
+        # soal keyring/cookies lagi. Login manual di Chrome ASLI selalu
+        # sukses mulus, jadi sekarang automation dibuat semirip mungkin:
+        # - channel="chrome": pakai binary Google Chrome asli yang
+        #   terinstall di sistem, bukan Chromium bawaan Playwright.
+        # - headless=False: jalan "headed" (butuh Xvfb di runner tanpa
+        #   monitor fisik -- lihat instruksi jalankan via `xvfb-run`).
+        # - --disable-blink-features=AutomationControlled: sembunyikan
+        #   flag navigator.webdriver yang jadi tanda paling umum dideteksi
+        #   situs sebagai automation.
+        # --password-store=basic tetap dipertahankan (perbaikan terpisah,
+        # valid untuk kasus reuse-sesi-lama yang gagal decrypt cookies).
         context = p.chromium.launch_persistent_context(
             profile_dir,
-            headless=True,
-            # --password-store=basic: Chrome di Linux normalnya enkripsi
-            # cookies pakai kunci dari OS keyring (GNOME Keyring/libsecret,
-            # via DBUS session desktop). Runner self-hosted yang dipicu dari
-            # terminal/tmux ./run.sh TIDAK selalu punya DBUS_SESSION_BUS_ADDRESS
-            # yang valid ke session desktop -- jadi walau profile & sesi
-            # trusted-nya valid (terbukti: login manual via Chrome asli di
-            # desktop sukses TANPA approval HP), Playwright headless tetap
-            # gagal decrypt cookies dan selalu lihat "belum login". Ini cocok
-            # dengan gejala: gagal identik berulang kali meski sudah approve
-            # HP manual. Flag ini bikin Chrome pakai kunci enkripsi statis,
-            # tidak bergantung keyring OS sama sekali -- konsisten dipakai
-            # headless/non-desktop-session. Konsekuensi: profile yang ada
-            # sekarang perlu SEKALI login ulang (kemungkinan minta approval
-            # HP sekali lagi) supaya cookies-nya ke-encode ulang pakai mode
-            # basic ini; setelah itu run berikutnya seharusnya konsisten.
+            channel="chrome",
+            headless=False,
+            viewport={"width": 1366, "height": 768},
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--password-store=basic",
+                "--disable-blink-features=AutomationControlled",
             ],
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                       "Chrome/125.0.0.0 Safari/537.36",
+                       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         )
 
         page = context.pages[0] if context.pages else context.new_page()

@@ -96,12 +96,21 @@ jobs:
         run: |
           pip install requests playwright
           python3 -m playwright install chromium
+          # V4 (17 Jul 2026): login sekarang pakai channel="chrome" (Google
+          # Chrome asli, bukan Chromium bawaan Playwright) + headless=False,
+          # supaya fingerprint automation semirip mungkin dengan login manual
+          # yang selalu sukses. "playwright install chrome" mendownload/
+          # register binary Chrome yang dikenali Playwright lewat channel.
+          python3 -m playwright install chrome
 
       - name: Validate gh auth
         run: gh auth status
 
       - name: Refresh bearer & push secret
-        run: python3 push_bearer_to_github.py
+        # headless=False butuh X server -- runner ini tidak selalu punya
+        # display fisik/aktif, jadi pakai xvfb-run untuk sediakan virtual
+        # display. Install sekali di runner: sudo apt-get install -y xvfb
+        run: xvfb-run --auto-servernum python3 push_bearer_to_github.py
 
       - name: Upload debug logs
         if: ${{ always() }}
