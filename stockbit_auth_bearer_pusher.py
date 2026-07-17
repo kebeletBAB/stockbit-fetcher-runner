@@ -159,35 +159,16 @@ def login_stockbit(
     captured = {"token": None, "candidates": []}
 
     with sync_playwright() as p:
-        # V4 (17 Jul 2026 FIX): screenshot debug membuktikan login form
-        # SUKSES di-submit tapi Stockbit diam-diam menolak (redirect ke
-        # homepage sebagai guest, tanpa pesan error) -- padahal kredensial
-        # sudah dipastikan valid manual. Ini pola khas anti-bot/fingerprint
-        # detection terhadap headless Chromium bawaan Playwright, BUKAN
-        # soal keyring/cookies lagi. Login manual di Chrome ASLI selalu
-        # sukses mulus, jadi sekarang automation dibuat semirip mungkin:
-        # - channel="chrome": pakai binary Google Chrome asli yang
-        #   terinstall di sistem, bukan Chromium bawaan Playwright.
-        # - headless=False: jalan "headed" (butuh Xvfb di runner tanpa
-        #   monitor fisik -- lihat instruksi jalankan via `xvfb-run`).
-        # - --disable-blink-features=AutomationControlled: sembunyikan
-        #   flag navigator.webdriver yang jadi tanda paling umum dideteksi
-        #   situs sebagai automation.
-        # --password-store=basic tetap dipertahankan (perbaikan terpisah,
-        # valid untuk kasus reuse-sesi-lama yang gagal decrypt cookies).
         context = p.chromium.launch_persistent_context(
             profile_dir,
-            channel="chrome",
-            headless=False,
-            viewport={"width": 1366, "height": 768},
+            headless=True,
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--password-store=basic",
-                "--disable-blink-features=AutomationControlled",
             ],
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                       "Chrome/125.0.0.0 Safari/537.36",
         )
 
         page = context.pages[0] if context.pages else context.new_page()
