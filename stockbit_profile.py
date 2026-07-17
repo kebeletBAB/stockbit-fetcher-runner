@@ -27,16 +27,24 @@ from datetime import datetime
 import os
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN", "")
 
-CSV_FILE = "queue_full_eipo-idx-bfr2016.csv"
+# CSV_FILE bisa di-override env (dipakai retry di GitHub Actions --
+# notify-done nulis retry_queue.csv lalu jalankan ulang cuma ticker gagal)
+CSV_FILE = os.environ.get("CSV_FILE", "queue_full_eipo-idx-bfr2016.csv")
 
 # Batch config (parallel GitHub Actions)
-import os
 BATCH_INDEX   = int(os.environ.get("BATCH_INDEX", "0"))
 TOTAL_BATCHES = int(os.environ.get("TOTAL_BATCHES", "1"))  # kolom 1=ticker, kolom 2=target sheet
 
-FETCH_SHAREHOLDERS      = False  # True = kirim data shareholders
-FETCH_COMPANY_HISTORY   = False  # True = kirim data company history
-FETCH_NUM_SHAREHOLDERS  = True   # True = kirim number of shareholders (paling sering)
+# V2 (17 Jul 2026): dulu hardcoded True/False, sekarang baca env supaya
+# bisa di-toggle dari workflow_dispatch di GitHub Actions tanpa edit kode.
+# Default TETAP sama seperti sebelumnya (cuma num_shareholders yang jalan)
+# supaya run lokal manual (tanpa env di-set) perilakunya tidak berubah.
+def _env_bool(name: str, default: str) -> bool:
+    return os.environ.get(name, default).strip().lower() == "true"
+
+FETCH_SHAREHOLDERS      = _env_bool("FETCH_SHAREHOLDERS", "false")      # True = kirim data shareholders
+FETCH_COMPANY_HISTORY   = _env_bool("FETCH_COMPANY_HISTORY", "false")   # True = kirim data company history
+FETCH_NUM_SHAREHOLDERS  = _env_bool("FETCH_NUM_SHAREHOLDERS", "true")   # True = kirim number of shareholders (paling sering)
 
 DELAY_ANTAR_SAHAM = 1.0  # detik jeda antar ticker
 

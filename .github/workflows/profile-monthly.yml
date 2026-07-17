@@ -1,0 +1,174 @@
+name: Stockbit Profile Monthly
+
+# Fetch data profile emiten (shareholders / company history / jumlah
+# pemegang saham, dari stockbit_profile.py) dan push ke Google Apps
+# Script per target sheet. TIDAK terhubung ke stockbit.yml (fetch
+# harian) -- data ini publish bulanan di Stockbit, jadi cukup
+# dijadwalkan tanggal 15 tiap bulan.
+#
+# V2 (17 Jul 2026): dibagi 9 batch paralel (sama seperti fetch-unified)
+# + 3 flag fetch bisa ditoggle dari workflow_dispatch (tidak perlu edit
+# stockbit_profile.py lagi) + retry otomatis ticker yang gagal di
+# notify-done (pola sama seperti stockbit.yml).
+
+on:
+  schedule:
+    - cron: '0 5 15 * *'
+  workflow_dispatch:
+    inputs:
+      bearer:
+        description: 'Bearer token baru (opsional, override secrets.BEARER_TOKEN untuk run ini saja)'
+        required: false
+      fetch_shareholders:
+        description: 'Kirim data shareholders (true/false)'
+        required: false
+        default: 'false'
+      fetch_company_history:
+        description: 'Kirim data company history (true/false)'
+        required: false
+        default: 'false'
+      fetch_num_shareholders:
+        description: 'Kirim data jumlah pemegang saham (true/false)'
+        required: false
+        default: 'true'
+
+env:
+  FETCH_SHAREHOLDERS: ${{ inputs.fetch_shareholders || 'false' }}
+  FETCH_COMPANY_HISTORY: ${{ inputs.fetch_company_history || 'false' }}
+  FETCH_NUM_SHAREHOLDERS: ${{ inputs.fetch_num_shareholders || 'true' }}
+
+jobs:
+  # ============================================================
+  # JOB 1: CEK BEARER TOKEN (baca saja -- refresh/update secret
+  # sudah jadi tanggung jawab refresh-bearer.yml, job ini cuma
+  # validasi token yang sudah ada masih hidup sebelum dipakai)
+  # ============================================================
+  check-bearer:
+    runs-on: ubuntu-latest
+    outputs:
+      bearer: ${{ steps.set-bearer.outputs.bearer }}
+    env:
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Set bearer output
+        id: set-bearer
+        run: |
+          echo "::add-mask::${BEARER_TOKEN}"
+          echo "bearer=${BEARER_TOKEN}" >> $GITHUB_OUTPUT
+      - name: Check Bearer Token
+        run: |
+          python3 check_bearer.py || (
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_CHAT_ID}" \
+              -d text="Profile Monthly: Bearer Token EXPIRED! Refresh dulu (refresh-bearer.yml atau input bearer manual) sebelum fetch profile bulanan." && exit 1
+          )
+
+  # ============================================================
+  # JOB 2: FETCH PROFILE, 9 batch paralel (sama pola dengan
+  # fetch-unified di stockbit.yml) -- ~876 ticker jadi ~100/batch,
+  # delay 1s/ticker di script.
+  # ============================================================
+  fetch-profile:
+    needs: check-bearer
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+      fail-fast: false
+    env:
+      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+      BATCH_INDEX: ${{ matrix.batch }}
+      TOTAL_BATCHES: "9"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Profile Fetch (batch ${{ matrix.batch }})
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u stockbit_profile.py
+      - name: Upload error logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-log-profile-batch-${{ matrix.batch }}
+          path: error_log_profile_*.csv
+          if-no-files-found: ignore
+
+  # ============================================================
+  # JOB 3: NOTIFY DONE + RETRY (gabung error log semua batch, retry
+  # sekali khusus ticker yang gagal -- pola sama seperti notify-done
+  # di stockbit.yml)
+  # ============================================================
+  notify-done:
+    needs: [check-bearer, fetch-profile]
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    env:
+      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Download all error logs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: error-log-profile-batch-*
+          merge-multiple: true
+          path: error_logs/
+        continue-on-error: true
+      - name: Gabung error logs & siapkan retry queue
+        run: |
+          python3 << 'PYEOF'
+          import csv, glob
+
+          all_errors = []
+          seen = set()
+          for f in glob.glob("error_logs/error_log_profile_*.csv"):
+              with open(f, newline="") as fp:
+                  for row in csv.DictReader(fp):
+                      key = (row["ticker"], row.get("target", ""))
+                      if key not in seen:
+                          seen.add(key)
+                          all_errors.append(row)
+
+          if not all_errors:
+              print("Tidak ada error, skip retry")
+              exit(0)
+
+          with open("retry_queue.csv", "w", newline="") as f:
+              w = csv.writer(f)
+              for e in all_errors:
+                  w.writerow([e["ticker"], e.get("target", "")])
+
+          print(f"Retry queue: {len(all_errors)} ticker")
+          PYEOF
+      - name: Run Retry
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          if [ -f retry_queue.csv ]; then
+            CSV_FILE=retry_queue.csv TOTAL_BATCHES=1 BATCH_INDEX=0 python -u stockbit_profile.py
+          fi
+      - name: Notify Done
+        run: |
+          RETRY=$([ -f retry_queue.csv ] && wc -l < retry_queue.csv || echo 0)
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="Profile Monthly selesai! Retry ${RETRY} ticker gagal di batch pertama."
