@@ -15,6 +15,11 @@ Keyring lokal tetap didukung sebagai fallback untuk pemakaian manual lama.
 
 import os
 import sys
+import time
+import subprocess
+from urllib.parse import urlparse
+from urllib.request import urlopen
+
 import requests
 
 try:
@@ -25,6 +30,10 @@ except Exception:
 SERVICE_NAME = "stockbit_bearer_pusher"
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
 
 
 def _from_keyring(field: str) -> str:
@@ -45,11 +54,17 @@ def _read_secret(env_name: str, keyring_field: str = "") -> str:
     return ""
 
 
-def _default_profile_dir(account_label: str) -> str:
+def _account_slug(account_label: str) -> str:
     slug = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in account_label).strip("-_")
-    if not slug:
-        slug = "default"
-    return os.path.join(_BASE_DIR, "logs", "bearer_profiles", slug)
+    return slug or "default"
+
+
+def _default_profile_dir(account_label: str) -> str:
+    return os.path.join(_BASE_DIR, "logs", "bearer_profiles", _account_slug(account_label))
+
+
+def _default_cdp_profile_dir(account_label: str) -> str:
+    return os.path.join(os.path.expanduser("~"), ".stockbit-bearer", "profiles", _account_slug(account_label))
 
 
 def _validate_token(token: str, verbose: bool = False) -> bool:
@@ -63,8 +78,7 @@ def _validate_token(token: str, verbose: bool = False) -> bool:
                 "origin": "https://stockbit.com",
                 "referer": "https://stockbit.com/",
                 "x-platform": "web",
-                "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                              "Chrome/125.0.0.0 Safari/537.36",
+                "user-agent": _USER_AGENT,
             },
             timeout=10,
         )
@@ -132,6 +146,93 @@ def _debug_screenshot(page, log_dir: str, name: str):
         print(f"   [DEBUG] Screenshot gagal ({name}): {e}")
 
 
+def _cdp_is_ready(cdp_url: str, timeout: float = 1.0) -> bool:
+    try:
+        with urlopen(cdp_url.rstrip("/") + "/json/version", timeout=timeout) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def _launch_chrome_for_cdp(cdp_url: str, profile_dir: str):
+    parsed = urlparse(cdp_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port
+    if not port:
+        raise RuntimeError(f"STOCKBIT_CDP_URL harus berisi port: {cdp_url}")
+
+    chrome_bin = os.environ.get("STOCKBIT_CHROME_BIN", "google-chrome")
+    cmd = [
+        chrome_bin,
+        f"--user-data-dir={profile_dir}",
+        f"--remote-debugging-address={host}",
+        f"--remote-debugging-port={port}",
+        "--no-first-run",
+        "--new-window",
+        "https://stockbit.com/stream",
+    ]
+
+    print(f"🚀 Chrome CDP belum hidup, launch Chrome port {port} ...")
+    proc = subprocess.Popen(cmd)
+    for _ in range(30):
+        if _cdp_is_ready(cdp_url):
+            return proc
+        if proc.poll() is not None:
+            raise RuntimeError(f"Chrome berhenti sebelum CDP siap (exit={proc.returncode}).")
+        time.sleep(1)
+
+    raise RuntimeError(f"Chrome sudah diluncurkan tapi CDP belum siap: {cdp_url}")
+
+
+def _stop_launched_chrome(proc):
+    if not proc or proc.poll() is not None:
+        return
+    print("🧹 Tutup Chrome CDP yang dibuka oleh script ...")
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+
+
+def _has_login_entrypoint(page) -> bool:
+    return page.query_selector("text=LOG IN") is not None or page.query_selector("text=Login") is not None
+
+
+def _capture_token_from_logged_in_page(page, captured, log_dir: str, debug_mode: bool, label: str) -> str | None:
+    print(f"🍪 Cek sesi Stockbit dari Chrome aktif ({label}) ...")
+    page.goto("https://stockbit.com/stream", wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(3000)
+    _dismiss_modal(page)
+
+    if debug_mode:
+        _debug_screenshot(page, log_dir, "debug_01_stream.png")
+        print(f"   [DEBUG] URL stream: {page.url}")
+
+    if _has_login_entrypoint(page):
+        raise RuntimeError(
+            "Chrome CDP belum login ke Stockbit.\n"
+            "Buka Chrome port CDP terkait, login manual ke Stockbit, lalu jalankan ulang script."
+        )
+
+    print("   ✅ Sesi Chrome aktif sudah login.")
+    page.goto("https://stockbit.com/symbol/IHSG", wait_until="domcontentloaded", timeout=30000)
+    _wait_network(page, 8)
+    if debug_mode:
+        _debug_screenshot(page, log_dir, "debug_02_ihsg_session_reuse.png")
+        print(f"   [DEBUG] URL IHSG reuse: {page.url}")
+        print(f"   [DEBUG] Kandidat request tertangkap: {len(captured.get('candidates', []))}")
+
+    token = _find_valid_token(captured, debug=debug_mode)
+    if token:
+        return token
+
+    print("   ⚠️  Token belum tertangkap, retry wait lebih lama ...")
+    _wait_network(page, 12)
+    return _find_valid_token(captured, debug=debug_mode)
+
 def login_stockbit(
     username: str | None = None,
     password: str | None = None,
@@ -141,10 +242,11 @@ def login_stockbit(
     from playwright.sync_api import sync_playwright
 
     account_label = account_label or os.environ.get("STOCKBIT_ACCOUNT_LABEL", "default")
+    cdp_url = os.environ.get("STOCKBIT_CDP_URL", "").strip()
     username = username or _read_secret("STOCKBIT_USERNAME", "username")
     password = password or _read_secret("STOCKBIT_PASSWORD", "password")
 
-    if not username or not password:
+    if not cdp_url and (not username or not password):
         raise RuntimeError(
             "Credential Stockbit tidak ditemukan.\n"
             "Set env STOCKBIT_USERNAME/STOCKBIT_PASSWORD atau setup keyring lokal."
@@ -152,13 +254,48 @@ def login_stockbit(
 
     log_dir = os.path.join(_BASE_DIR, "logs")
     os.makedirs(log_dir, exist_ok=True)
-    profile_dir = profile_dir or os.environ.get("STOCKBIT_PROFILE_DIR", "").strip() or _default_profile_dir(account_label)
+    profile_dir = profile_dir or os.environ.get("STOCKBIT_PROFILE_DIR", "").strip()
+    if not profile_dir:
+        profile_dir = _default_cdp_profile_dir(account_label) if cdp_url else _default_profile_dir(account_label)
     os.makedirs(profile_dir, exist_ok=True)
 
     debug_mode = os.environ.get("DEBUG_LOGIN", "false").lower() == "true"
     captured = {"token": None, "candidates": []}
 
     with sync_playwright() as p:
+        if cdp_url:
+            launched_chrome = None
+            if not _cdp_is_ready(cdp_url):
+                launched_chrome = _launch_chrome_for_cdp(cdp_url, profile_dir)
+
+            print(f"🔌 Connect ke Chrome CDP ({cdp_url}) ...")
+            try:
+                browser = p.chromium.connect_over_cdp(cdp_url)
+            except Exception as e:
+                _stop_launched_chrome(launched_chrome)
+                raise RuntimeError(
+                    f"Tidak bisa connect ke Chrome CDP: {cdp_url}\n"
+                    "Pastikan Chrome untuk Stockbit dijalankan dengan "
+                    "--remote-debugging-port, dan portnya sesuai STOCKBIT_CDP_URL."
+                ) from e
+
+            try:
+                context = browser.contexts[0] if browser.contexts else browser.new_context()
+                page = context.new_page()
+                _intercept_token(page, captured)
+                token = _capture_token_from_logged_in_page(page, captured, log_dir, debug_mode, account_label)
+                page.close()
+                if token:
+                    return token
+                if debug_mode:
+                    print(f"   [DEBUG] Final kandidat token: {len(captured.get('candidates', []))}")
+                raise RuntimeError(
+                    "Token tidak berhasil ditangkap dari Chrome CDP.\n"
+                    "Pastikan Chrome di STOCKBIT_CDP_URL masih login dan halaman Stockbit bisa memuat data."
+                )
+            finally:
+                _stop_launched_chrome(launched_chrome)
+
         context = p.chromium.launch_persistent_context(
             profile_dir,
             headless=True,
@@ -167,8 +304,7 @@ def login_stockbit(
                 "--disable-dev-shm-usage",
                 "--password-store=basic",
             ],
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                       "Chrome/125.0.0.0 Safari/537.36",
+            user_agent=_USER_AGENT,
         )
 
         page = context.pages[0] if context.pages else context.new_page()
@@ -182,7 +318,7 @@ def login_stockbit(
             _debug_screenshot(page, log_dir, "debug_01_feed.png")
             print(f"   [DEBUG] URL feed: {page.url}")
 
-        already_logged_in = page.query_selector("text=LOG IN") is None and page.query_selector("text=Login") is None
+        already_logged_in = not _has_login_entrypoint(page)
 
         if already_logged_in:
             print("   ✅ Sesi masih valid, tidak perlu login ulang.")

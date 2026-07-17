@@ -38,6 +38,7 @@ jobs:
       TRIGGER_FETCH_AFTER_REFRESH: ${{ inputs.trigger_fetch || 'false' }}
       FORCE_FETCH_RUN: ${{ inputs.force_fetch_run || 'false' }}
       DEBUG_LOGIN: ${{ inputs.debug_login || 'false' }}
+      SECONDARY_CDP_URL: ${{ secrets.STOCKBIT_SECONDARY_CDP_URL }}
       TARGET_GH_REPO: ${{ github.repository }}
       TARGET_GH_SECRET: BEARER_TOKEN
       FETCH_WORKFLOW_FILE: stockbit.yml
@@ -64,11 +65,13 @@ jobs:
               USERNAME="${PRIMARY_USERNAME}"
               PASSWORD="${PRIMARY_PASSWORD}"
               ACCOUNT_LABEL="primary"
+              CDP_URL="http://127.0.0.1:9223"
               ;;
             secondary)
               USERNAME="${SECONDARY_USERNAME}"
               PASSWORD="${SECONDARY_PASSWORD}"
               ACCOUNT_LABEL="secondary"
+              CDP_URL="${SECONDARY_CDP_URL}"
               ;;
             *)
               echo "ACCOUNT tidak dikenal: ${ACCOUNT}" >&2
@@ -91,6 +94,9 @@ jobs:
           echo "STOCKBIT_PASSWORD=${PASSWORD}" >> "${GITHUB_ENV}"
           echo "STOCKBIT_ACCOUNT_LABEL=${ACCOUNT_LABEL}" >> "${GITHUB_ENV}"
           echo "STOCKBIT_PROFILE_DIR=${PROFILE_DIR}" >> "${GITHUB_ENV}"
+          if [ -n "${CDP_URL}" ]; then
+            echo "STOCKBIT_CDP_URL=${CDP_URL}" >> "${GITHUB_ENV}"
+          fi
 
       - name: Install dependencies
         run: |
