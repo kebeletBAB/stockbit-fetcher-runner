@@ -153,6 +153,8 @@ jobs:
         env:
           BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
           FORCE_RUN: ${{ inputs.force_run || 'false' }}
+          WAIT_FOR_DATA_ATTEMPTS: "18"
+          WAIT_FOR_DATA_SLEEP_SECONDS: "900"
           PYTHONUNBUFFERED: "1"
         # -u = unbuffered, supaya print() muncul real-time di log GitHub
         # Actions, bukan telat/nunggu buffer flush (lihat CHANGELOG FIX

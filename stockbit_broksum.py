@@ -377,6 +377,9 @@ def run(mode):
 
 
 def wait_for_today_data():
+    max_attempts = int(os.environ.get("WAIT_FOR_DATA_ATTEMPTS", "30"))
+    sleep_seconds = int(os.environ.get("WAIT_FOR_DATA_SLEEP_SECONDS", "60"))
+
     # FIX (9 Jul 2026): dua masalah dibenerin sekaligus --
     # 1) "today" dulu pakai date.today() (timezone SERVER runner, biasanya
     #    UTC di GitHub Actions), dibanding ke field API yang kemungkinan
@@ -397,7 +400,7 @@ def wait_for_today_data():
     from datetime import timezone, timedelta
     wib = timezone(timedelta(hours=7))
     today = datetime.now(wib).date().strftime("%Y-%m-%d")
-    for i in range(30):
+    for i in range(max_attempts):
         try:
             resp = fetch_stockbit("BBCA", "BROKER_SUMMARY_PERIOD_LATEST")
             data_date_raw = str(resp.get("data", {}).get("from", ""))
@@ -405,10 +408,15 @@ def wait_for_today_data():
             if data_date == today:
                 print(f"✅ Data sudah update ke {today} (raw API: {data_date_raw!r})", flush=True)
                 return True
-            print(f"⏳ Data masih {data_date_raw!r} (dibaca sebagai {data_date}), belum {today}. Tunggu 1 menit... ({i+1}/30)", flush=True)
+            print(
+                f"⏳ Data masih {data_date_raw!r} (dibaca sebagai {data_date}), belum {today}. "
+                f"Tunggu {sleep_seconds // 60} menit... ({i+1}/{max_attempts})",
+                flush=True,
+            )
         except Exception as e:
             print(f"⚠️ Error cek data: {e}", flush=True)
-        time.sleep(60)
+        if i + 1 < max_attempts:
+            time.sleep(sleep_seconds)
     return False
 
 if __name__ == "__main__":
@@ -420,7 +428,7 @@ if __name__ == "__main__":
     if "--wait-only" in sys.argv:
         # Dipanggil dari job gate wait-for-data — cek sekali untuk semua batch
         if not wait_for_today_data():
-            print("❌ Data tidak update setelah 30 menit, abort!")
+            print("❌ Data tidak update setelah batas tunggu, abort!")
             exit(1)
         print("✅ Gate lolos — data sudah settle, matrix job siap jalan.")
         exit(0)
