@@ -258,32 +258,7 @@ def login_stockbit(
             except Exception:
                 continue
 
-        # V3 (17 Jul 2026 FIX): dulu cuma tunggu 3 detik lalu langsung
-        # nyerah kalau masih di /login -- padahal kalau Stockbit minta
-        # approval manual via HP (bukan OTP email), orangnya butuh waktu
-        # buka HP dan tap approve, jelas lebih dari 3 detik. Sekarang
-        # polling sampai APPROVAL_WAIT_SECONDS (default 20 detik, bisa
-        # di-override env), berhenti lebih awal begitu URL sudah pindah
-        # dari /login (approval granted) atau token sudah tertangkap.
-        approval_wait_seconds = int(os.environ.get("APPROVAL_WAIT_SECONDS", "20"))
-        poll_interval_ms = 2000
-        elapsed_ms = 0
-        while elapsed_ms < approval_wait_seconds * 1000:
-            page.wait_for_timeout(poll_interval_ms)
-            elapsed_ms += poll_interval_ms
-            still_on_login = "/login" in page.url
-            has_token = bool(captured.get("candidates"))
-            if debug_mode:
-                print(f"   [DEBUG] Nunggu approval/redirect ... {elapsed_ms // 1000}s "
-                      f"(URL: {page.url}, token kandidat: {len(captured.get('candidates', []))})")
-            if not still_on_login or has_token:
-                print(f"   → Terdeteksi progres setelah {elapsed_ms // 1000}s "
-                      f"(redirect dari /login atau token tertangkap)")
-                break
-        else:
-            print(f"   ⚠️  Masih di halaman login setelah {approval_wait_seconds}s "
-                  f"-- kalau ini gara-gara approval HP, mungkin belum sempat di-tap.")
-
+        page.wait_for_timeout(3000)
         if debug_mode:
             _debug_screenshot(page, log_dir, "debug_03_after_submit.png")
             print(f"   [DEBUG] URL setelah submit: {page.url}")
