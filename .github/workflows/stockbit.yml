@@ -115,7 +115,7 @@ jobs:
             -H "origin: https://stockbit.com" \
             -H "x-platform: web" \
             -H "user-agent: Mozilla/5.0" \
-            "https://exodus.stockbit.com/marketdetectors/BBCA?transaction_type=TRANSACTION_TYPE_NET&market_board=MARKET_BOARD_REGULER&investor_type=INVESTOR_TYPE_ALL&limit=1&period=BROKER_SUMMARY_PERIOD_LATEST")
+            "https://exodus.stockbit.com/marketdetectors/BBCA?transaction_type=TRANSACTION_TYPE_NET&market_board=MARKET_BOARD_REGULER&investor_type=INVESTOR_TYPE_ALL&limit=25&period=BROKER_SUMMARY_PERIOD_LATEST")
           echo "Curl status: $STATUS"
       - name: Check Bearer Token
         run: |
@@ -151,7 +151,7 @@ jobs:
         run: pip install requests
       - name: Tunggu data settle (1x cek untuk semua batch)
         env:
-          BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+          BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
           FORCE_RUN: ${{ inputs.force_run || 'false' }}
           PYTHONUNBUFFERED: "1"
         # -u = unbuffered, supaya print() muncul real-time di log GitHub
@@ -184,7 +184,7 @@ jobs:
         batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
       fail-fast: false
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       BATCH_INDEX: ${{ matrix.batch }}
       TOTAL_BATCHES: "9"
       FORCE_RUN: ${{ inputs.force_run || 'false' }}
@@ -318,7 +318,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'IDX' || inputs.gap_scan_universe == 'all') }}
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       MODE: gap_scan
       UNIVERSE: IDX
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
@@ -345,7 +345,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'eIPO' || inputs.gap_scan_universe == 'all') }}
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       MODE: gap_scan
       UNIVERSE: eIPO
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
@@ -372,7 +372,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run_gap_scan == 'true' && (inputs.gap_scan_universe == 'Bfr2016' || inputs.gap_scan_universe == 'all') }}
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       MODE: gap_scan
       UNIVERSE: Bfr2016
       YOUR_EMAIL: "ajat.anthiexx@gmail.com"
@@ -402,7 +402,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run_backfill == 'true' }}
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
@@ -432,7 +432,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run_broksum_db_backfill == 'true' }}
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       BROKSUM_DB_IDX: ${{ secrets.BROKSUM_DB_IDX }}
       BROKSUM_DB_EIPO: ${{ secrets.BROKSUM_DB_EIPO }}
       BROKSUM_DB_BFR2016: ${{ secrets.BROKSUM_DB_BFR2016 }}
@@ -470,7 +470,7 @@ jobs:
     # ngefek (masih ada job jalan sampai selesai).
     if: ${{ !cancelled() }}
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GH_TOKEN: ${{ secrets.GH_PAT }}

@@ -91,7 +91,7 @@ jobs:
         batch: [0, 1, 2, 3, 4, 5, 6, 7, 8]
       fail-fast: false
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       BATCH_INDEX: ${{ matrix.batch }}
       TOTAL_BATCHES: "9"
     steps:
@@ -123,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
     env:
-      BEARER_TOKEN: ${{ needs.check-bearer.outputs.bearer }}
+      BEARER_TOKEN: ${{ inputs.bearer || secrets.BEARER_TOKEN }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
