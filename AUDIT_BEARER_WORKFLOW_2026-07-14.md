@@ -14,6 +14,27 @@ Dokumen ini merangkum temuan audit agar bisa dipakai lintas sesi. Audit ini tida
 - Perbaikan workflow untuk kasus `wait-for-data` gagal sebagian sudah benar di level gate script, tetapi penanganan cancel belum bersih karena `always()` masih ada di workflow aktif.
 - Fallback Telegram `/bearer <token>` tidak terlihat terimplementasi inbound di repo ini; yang ada hanya notifikasi outbound yang menyuruh user mengirim command itu ke bot.
 
+## Update Codex 20 Jul 2026
+
+Audit ini adalah histori 14 Jul 2026. Desain refresh bearer aktif sudah berubah.
+
+Urutan final refresh bearer:
+
+1. `primary` lewat Chrome CDP `http://127.0.0.1:9223`
+2. `secondary` lewat Chrome CDP `http://127.0.0.1:9225`
+3. fallback terakhir persistent Playwright memakai akun `secondary` dan profile
+   autorunner:
+   `/home/fatih/Documents/Saham Indo/Python/stockbit-autorunner/logs/chrome_profile`
+
+Mode CDP sekarang boleh auto-login dengan ID/password bila port hidup tetapi
+sesi Stockbit belum login. OTP guard tetap ada untuk run non-interaktif.
+
+Fallback Playwright bukan jalur utama. Akun secondary belum verifikasi KTP dan
+harus dipakai seminimal mungkin: hanya refresh bearer singkat bila dua jalur
+CDP gagal. Profile autorunner dipilih karena setiap hari sudah dipanaskan oleh
+cron `stockbit_checkpoint.py`, sehingga selama trusted, fallback ini seharusnya
+reuse sesi atau login otomatis tanpa OTP.
+
 ## Cakupan file yang diaudit
 
 - `.github/workflows/stockbit.yml`

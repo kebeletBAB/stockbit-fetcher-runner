@@ -178,6 +178,13 @@ def _launch_chrome_for_cdp(cdp_url: str, profile_dir: str):
         raise RuntimeError(f"STOCKBIT_CDP_URL harus berisi port: {cdp_url}")
 
     chrome_bin = os.environ.get("STOCKBIT_CHROME_BIN", "google-chrome")
+    if not os.environ.get("DISPLAY"):
+        raise RuntimeError(
+            f"Chrome CDP belum hidup di {cdp_url}, dan runner tidak punya DISPLAY untuk launch Chrome.\n"
+            "Jalankan Chrome Stockbit dengan --remote-debugging-port pada mesin runner, "
+            "atau jalankan runner di sesi desktop/Xvfb."
+        )
+
     cmd = [
         chrome_bin,
         f"--user-data-dir={profile_dir}",
@@ -217,7 +224,146 @@ def _has_login_entrypoint(page) -> bool:
     return page.query_selector("text=LOG IN") is not None or page.query_selector("text=Login") is not None
 
 
-def _capture_token_from_logged_in_page(page, captured, log_dir: str, debug_mode: bool, label: str) -> str | None:
+def _login_form_and_capture_token(
+    page,
+    captured,
+    log_dir: str,
+    debug_mode: bool,
+    username: str,
+    password: str,
+) -> str | None:
+    print(f"🔐 Login form Stockbit ({username}) ...")
+    page.goto("https://stockbit.com/login", wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(2000)
+    _dismiss_modal(page)
+
+    if debug_mode:
+        _debug_screenshot(page, log_dir, "debug_login_page.png")
+        print(f"   [DEBUG] URL saat ini: {page.url}")
+
+    for sel in ["input[type='email']", "input[name='username']", "input[name='email']",
+                "input[placeholder*='Email']", "input[placeholder*='email']"]:
+        try:
+            page.wait_for_selector(sel, timeout=3000)
+            page.fill(sel, username)
+            print(f"   -> Email diisi ({sel})")
+            break
+        except Exception:
+            continue
+
+    for sel in ["input[type='password']", "input[name='password']"]:
+        try:
+            page.wait_for_selector(sel, timeout=3000)
+            page.fill(sel, password)
+            print(f"   -> Password diisi ({sel})")
+            break
+        except Exception:
+            continue
+
+    for sel in ["button[type='submit']", "button:has-text('Masuk')",
+                "button:has-text('Login')", "button:has-text('Sign in')"]:
+        try:
+            page.wait_for_selector(sel, timeout=3000)
+            page.click(sel)
+            print(f"   -> Tombol diklik ({sel})")
+            break
+        except Exception:
+            continue
+
+    page.wait_for_timeout(3000)
+    if debug_mode:
+        _debug_screenshot(page, log_dir, "debug_03_after_submit.png")
+        print(f"   [DEBUG] URL setelah submit: {page.url}")
+
+    otp_selectors = [
+        "text=Verification Code",
+        "text=Email Verification",
+        "input[maxlength='1']",
+        "input[type='number']",
+    ]
+    is_otp_screen = False
+    for sel in otp_selectors:
+        try:
+            page.wait_for_selector(sel, timeout=4000)
+            is_otp_screen = True
+            break
+        except Exception:
+            continue
+
+    if is_otp_screen:
+        if not sys.stdin.isatty():
+            raise RuntimeError(
+                "OTP dibutuhkan tapi script jalan non-interaktif.\n"
+                "Jalankan manual sekali pada Chrome/profile akun ini untuk isi OTP, "
+                "supaya trusted profile tersimpan dan run berikutnya tidak perlu OTP lagi."
+            )
+
+        print("\n" + "=" * 55)
+        print("  OTP DIBUTUHKAN")
+        print("  Cek email kamu, masukkan kode 6 digit di bawah:")
+        print("=" * 55)
+        otp_code = input("  OTP Code: ").strip()
+
+        otp_boxes = page.query_selector_all("input[maxlength='1']")
+        if otp_boxes and len(otp_boxes) >= 6:
+            for i, digit in enumerate(otp_code[:6]):
+                otp_boxes[i].fill(digit)
+                page.wait_for_timeout(100)
+        else:
+            for sel in ["input[type='number']", "input[type='text']", "input[inputmode='numeric']"]:
+                try:
+                    page.fill(sel, otp_code)
+                    break
+                except Exception:
+                    continue
+
+        for sel in ["button:has-text('Continue')", "button:has-text('Verif')",
+                    "button[type='submit']", "button:has-text('Lanjut')"]:
+            try:
+                page.wait_for_selector(sel, timeout=3000)
+                page.click(sel)
+                print("   -> OTP submitted")
+                break
+            except Exception:
+                continue
+
+        page.wait_for_timeout(3000)
+        if debug_mode:
+            _debug_screenshot(page, log_dir, "debug_04_after_otp.png")
+            print(f"   [DEBUG] URL setelah OTP: {page.url}")
+
+    print("   -> Menunggu token dari network ...")
+    try:
+        page.goto("https://stockbit.com/", wait_until="domcontentloaded", timeout=20000)
+        page.wait_for_timeout(3000)
+        _dismiss_modal(page)
+    except Exception:
+        pass
+
+    try:
+        page.goto("https://stockbit.com/symbol/IHSG", wait_until="domcontentloaded", timeout=20000)
+        page.wait_for_timeout(3000)
+    except Exception:
+        pass
+
+    _wait_network(page, 5)
+    if debug_mode:
+        _debug_screenshot(page, log_dir, "debug_05_before_token_scan.png")
+        print(f"   [DEBUG] URL sebelum scan token: {page.url}")
+        print(f"   [DEBUG] Kandidat request tertangkap: {len(captured.get('candidates', []))}")
+
+    return _find_valid_token(captured, debug=debug_mode)
+
+
+def _capture_token_from_logged_in_page(
+    page,
+    captured,
+    log_dir: str,
+    debug_mode: bool,
+    label: str,
+    username: str = "",
+    password: str = "",
+) -> str | None:
     print(f"🍪 Cek sesi Stockbit dari Chrome aktif ({label}) ...")
     page.goto("https://stockbit.com/stream", wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(3000)
@@ -228,10 +374,12 @@ def _capture_token_from_logged_in_page(page, captured, log_dir: str, debug_mode:
         print(f"   [DEBUG] URL stream: {page.url}")
 
     if _has_login_entrypoint(page):
-        raise RuntimeError(
-            "Chrome CDP belum login ke Stockbit.\n"
-            "Buka Chrome port CDP terkait, login manual ke Stockbit, lalu jalankan ulang script."
-        )
+        if not username or not password:
+            raise RuntimeError(
+                "Chrome CDP belum login ke Stockbit dan credential tidak tersedia untuk login otomatis."
+            )
+        print("   ⚠️  Sesi Chrome aktif belum login, lanjut login form otomatis ...")
+        return _login_form_and_capture_token(page, captured, log_dir, debug_mode, username, password)
 
     print("   ✅ Sesi Chrome aktif sudah login.")
     page.goto("https://stockbit.com/symbol/IHSG", wait_until="domcontentloaded", timeout=30000)
@@ -299,7 +447,15 @@ def login_stockbit(
                 context = browser.contexts[0] if browser.contexts else browser.new_context()
                 page = context.new_page()
                 _intercept_token(page, captured)
-                token = _capture_token_from_logged_in_page(page, captured, log_dir, debug_mode, account_label)
+                token = _capture_token_from_logged_in_page(
+                    page,
+                    captured,
+                    log_dir,
+                    debug_mode,
+                    account_label,
+                    username,
+                    password,
+                )
                 page.close()
                 if token:
                     return token

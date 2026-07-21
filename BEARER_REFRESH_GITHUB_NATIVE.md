@@ -71,6 +71,29 @@ Workflow refresh menyimpan profile per akun di runner:
 
 Jangan hapus folder ini kecuali memang ingin paksa re-auth akun terkait.
 
+## Urutan fallback final per 20 Jul 2026
+
+Refresh bearer sekarang memakai tiga lapis, berurutan:
+
+1. `primary` lewat Chrome CDP `http://127.0.0.1:9223`
+2. `secondary` lewat Chrome CDP `http://127.0.0.1:9225`
+3. fallback terakhir: persistent Playwright memakai akun `secondary` dan
+   profile autorunner:
+   `/home/fatih/Documents/Saham Indo/Python/stockbit-autorunner/logs/chrome_profile`
+
+Catatan penting:
+
+- `secondary` hanya cadangan minimal untuk refresh bearer, bukan jalur rutin
+  workload berat.
+- fallback Playwright hanya dipakai bila dua jalur CDP gagal pada tahap
+  login/ambil token.
+- profile autorunner sudah dipanaskan oleh cron harian `stockbit_checkpoint.py`,
+  jadi selama profile itu trusted, fallback ketiga cukup login otomatis atau
+  reuse sesi tanpa OTP.
+- jika kegagalan terjadi setelah token didapat, misalnya `gh secret set` atau
+  trigger workflow fetch gagal, fallback akun tidak dijalankan karena masalahnya
+  bukan login Stockbit.
+
 ### Status tervalidasi saat ini
 
 Untuk akun `primary`, jalur yang SUDAH TERBUKTI berhasil adalah:
@@ -214,9 +237,10 @@ berikut sebagai baseline yang sudah terbukti:
    - symlink profile trusted ke `/home/fatih/chrome-remote-profile-akun2`
 5. jangan buru-buru refactor auth lagi kalau profile trusted ini masih jalan
 6. jika bearer refresh gagal lagi, cek dulu:
-   - apakah symlink profile `primary` masih benar
-   - apakah profile trusted sedang dipakai/ter-lock proses Chrome lain
-   - apakah challenge HP muncul lagi
+   - apakah CDP `9223` hidup untuk primary
+   - apakah CDP `9225` hidup untuk secondary
+   - apakah profile autorunner masih trusted
+   - apakah challenge HP/OTP muncul lagi
 
 ## SOP singkat saat token expired / refresh gagal
 
@@ -395,4 +419,3 @@ Set `force_run=true` bila perlu
           v
 Google Sheets tetap bisa diupdate
 ```
-

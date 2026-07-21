@@ -106,16 +106,24 @@ jobs:
         run: gh auth status
 
       - name: Refresh bearer & push secret
-        shell: bash
+        # PENTING: shell: bash biasa diam-diam menjalankan bash dengan
+        # flag -e (errexit) bawaan GitHub Actions. `set -uo pipefail` di
+        # bawah TIDAK mematikan -e itu (cuma nambah -u & pipefail), jadi
+        # begitu run_refresh primary keluar exit code 10, seluruh step
+        # langsung berhenti SEBELUM baris `status=$?` sempat jalan --
+        # fallback ke secondary/autorunner jadi dead code, tidak pernah
+        # tereksekusi. Override eksplisit shell invocation di sini supaya
+        # -e benar-benar tidak aktif.
+        shell: bash --noprofile --norc -uo pipefail {0}
         run: |
-          set -uo pipefail
-
           run_refresh() {
             local label="$1"
             local username="$2"
             local password="$3"
             local cdp_url="$4"
             local suppress_login_failure="${5:-false}"
+            local profile_suffix="${6:-${label}}"
+            local autorunner_profile="/home/fatih/Documents/Saham Indo/Python/stockbit-autorunner/logs/chrome_profile"
 
             if [ -z "${username}" ] || [ -z "${password}" ]; then
               echo "Credential kosong untuk fallback account=${label}" >&2
@@ -125,31 +133,56 @@ jobs:
             export STOCKBIT_USERNAME="${username}"
             export STOCKBIT_PASSWORD="${password}"
             export STOCKBIT_ACCOUNT_LABEL="${label}"
-            export STOCKBIT_PROFILE_DIR="${HOME}/.stockbit-bearer/profiles/${label}"
+            if [ "${profile_suffix}" = "autorunner-playwright" ]; then
+              export STOCKBIT_PROFILE_DIR="${autorunner_profile}"
+            else
+              export STOCKBIT_PROFILE_DIR="${HOME}/.stockbit-bearer/profiles/${profile_suffix}"
+            fi
             export STOCKBIT_CDP_URL="${cdp_url}"
             export SUPPRESS_LOGIN_FAILURE_TELEGRAM="${suppress_login_failure}"
 
             mkdir -p "${STOCKBIT_PROFILE_DIR}"
-            echo "== Refresh bearer account=${label} cdp=${cdp_url} =="
+            if [ -n "${cdp_url}" ]; then
+              echo "== Refresh bearer account=${label} cdp=${cdp_url} =="
+            else
+              echo "== Refresh bearer account=${label} mode=persistent-playwright =="
+            fi
             python3 push_bearer_to_github.py
           }
 
           if [ "${ACCOUNT}" = "primary" ]; then
-            run_refresh primary "${PRIMARY_USERNAME}" "${PRIMARY_PASSWORD}" "http://127.0.0.1:9223" true
-            status=$?
-            if [ "${status}" -eq 0 ]; then
+            if run_refresh primary "${PRIMARY_USERNAME}" "${PRIMARY_PASSWORD}" "http://127.0.0.1:9223" true; then
               exit 0
             fi
+            status=$?
             if [ "${status}" -ne 10 ]; then
               exit "${status}"
             fi
 
             echo "::warning::Primary bearer refresh failed at login/token stage; fallback to secondary."
-            run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "http://127.0.0.1:9225" false
+            if run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "http://127.0.0.1:9225" true; then
+              exit 0
+            fi
+            status=$?
+            if [ "${status}" -ne 10 ]; then
+              exit "${status}"
+            fi
+
+            echo "::warning::Secondary CDP bearer refresh failed at login/token stage; fallback to secondary persistent Playwright."
+            run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "" false "autorunner-playwright"
             exit $?
           fi
 
-          run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "http://127.0.0.1:9225" false
+          if run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "http://127.0.0.1:9225" true; then
+            exit 0
+          fi
+          status=$?
+          if [ "${status}" -ne 10 ]; then
+            exit "${status}"
+          fi
+
+          echo "::warning::Secondary CDP bearer refresh failed at login/token stage; fallback to secondary persistent Playwright."
+          run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "" false "autorunner-playwright"
 
       - name: Upload debug logs
         if: ${{ always() }}

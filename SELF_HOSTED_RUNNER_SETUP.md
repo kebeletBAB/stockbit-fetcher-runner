@@ -118,6 +118,25 @@ dan berhasil dipakai untuk:
 Kalau nanti runner atau workflow tiba-tiba gagal login lagi, cek symlink ini
 lebih dulu sebelum debugging yang lain.
 
+### Mode refresh final per 20 Jul 2026
+
+Urutan refresh bearer:
+
+1. primary Chrome CDP `http://127.0.0.1:9223`
+2. secondary Chrome CDP `http://127.0.0.1:9225`
+3. fallback terakhir persistent Playwright akun secondary memakai profile:
+   `/home/fatih/Documents/Saham Indo/Python/stockbit-autorunner/logs/chrome_profile`
+
+Chrome CDP hanya bisa diluncurkan otomatis bila runner punya sesi grafis
+(`DISPLAY`). Jika runner berjalan sebagai service tanpa display, port CDP harus
+sudah hidup sebelum workflow berjalan. Layar monitor boleh mati, tetapi mesin
+tidak boleh sleep/suspend.
+
+Fallback ketiga sengaja memakai profile autorunner karena profile itu sudah
+dipanaskan oleh cron harian `stockbit_checkpoint.py`. Akun secondary tidak
+dipakai untuk workload berat; hanya untuk refresh bearer singkat bila primary
+dan secondary CDP gagal.
+
 ## 5. Siapkan secrets GitHub
 
 Masuk ke repo GitHub:
@@ -293,4 +312,3 @@ Praktiknya:
 
 - kalau `wait-for-data` gagal atau belum `success`, `fetch-ohlc` tidak jalan
 - kalau `force_fetch_date` dipakai, `fetch-ohlc` di-skip dulu
-
