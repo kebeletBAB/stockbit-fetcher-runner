@@ -106,14 +106,21 @@ jobs:
         run: gh auth status
 
       - name: Refresh bearer & push secret
-        # PENTING: shell: bash biasa diam-diam menjalankan bash dengan
-        # flag -e (errexit) bawaan GitHub Actions. `set -uo pipefail` di
-        # bawah TIDAK mematikan -e itu (cuma nambah -u & pipefail), jadi
-        # begitu run_refresh primary keluar exit code 10, seluruh step
-        # langsung berhenti SEBELUM baris `status=$?` sempat jalan --
-        # fallback ke secondary/autorunner jadi dead code, tidak pernah
-        # tereksekusi. Override eksplisit shell invocation di sini supaya
-        # -e benar-benar tidak aktif.
+        # PENTING #1: shell: bash biasa diam-diam menjalankan bash dengan
+        # flag -e (errexit) bawaan GitHub Actions. Override shell invocation
+        # di bawah supaya -e tidak aktif.
+        #
+        # PENTING #2 (bug POSIX yang lebih halus, ditemukan 21 Jul 2026):
+        # `if run_refresh ...; then exit 0; fi` lalu `status=$?` SELALU
+        # menghasilkan status=0, bukan exit code asli run_refresh -- ini
+        # perilaku resmi POSIX: kalau branch "then" pada blok if TIDAK
+        # dieksekusi (kondisinya gagal) dan tidak ada "else", exit status
+        # keseluruhan blok if DIANGGAP 0, bukan exit code dari command yang
+        # dites. Akibatnya `status` selalu 0, `-ne 10` selalu true, script
+        # langsung exit 0 diam-diam -- fallback ke secondary/autorunner
+        # jadi dead code, PERSIS seperti bug -e sebelumnya tapi beda akar
+        # masalah. Fix: panggil run_refresh sebagai statement biasa dulu,
+        # baru capture $? -- JANGAN jadikan run_refresh kondisi if.
         shell: bash --noprofile --norc -uo pipefail {0}
         run: |
           run_refresh() {
@@ -151,19 +158,21 @@ jobs:
           }
 
           if [ "${ACCOUNT}" = "primary" ]; then
-            if run_refresh primary "${PRIMARY_USERNAME}" "${PRIMARY_PASSWORD}" "http://127.0.0.1:9223" true; then
+            run_refresh primary "${PRIMARY_USERNAME}" "${PRIMARY_PASSWORD}" "http://127.0.0.1:9223" true
+            status=$?
+            if [ "${status}" -eq 0 ]; then
               exit 0
             fi
-            status=$?
             if [ "${status}" -ne 10 ]; then
               exit "${status}"
             fi
 
             echo "::warning::Primary bearer refresh failed at login/token stage; fallback to secondary."
-            if run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "http://127.0.0.1:9225" true; then
+            run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "http://127.0.0.1:9225" true
+            status=$?
+            if [ "${status}" -eq 0 ]; then
               exit 0
             fi
-            status=$?
             if [ "${status}" -ne 10 ]; then
               exit "${status}"
             fi
@@ -173,10 +182,11 @@ jobs:
             exit $?
           fi
 
-          if run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "http://127.0.0.1:9225" true; then
+          run_refresh secondary "${SECONDARY_USERNAME}" "${SECONDARY_PASSWORD}" "http://127.0.0.1:9225" true
+          status=$?
+          if [ "${status}" -eq 0 ]; then
             exit 0
           fi
-          status=$?
           if [ "${status}" -ne 10 ]; then
             exit "${status}"
           fi
