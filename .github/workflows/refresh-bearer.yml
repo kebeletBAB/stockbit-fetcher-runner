@@ -121,8 +121,34 @@ jobs:
         # jadi dead code, PERSIS seperti bug -e sebelumnya tapi beda akar
         # masalah. Fix: panggil run_refresh sebagai statement biasa dulu,
         # baru capture $? -- JANGAN jadikan run_refresh kondisi if.
+        #
+        # PENTING #3 (21 Jul 2026): supaya _launch_chrome_for_cdp() di
+        # stockbit_auth_bearer_pusher.py bisa BENERAN buka Chrome sendiri
+        # (non-headless, biar tidak kena anti-bot detection) kalau CDP
+        # belum hidup, lalu tutup sendiri setelah selesai
+        # (_stop_launched_chrome) -- tidak perlu lagi Chrome dibiarkan
+        # terbuka manual terus-menerus.
+        #
+        # Pakai konvensi DISPLAY=:99 yang SAMA dengan buku-extractor/
+        # sound-extractor (lihat buku-extractor/GANTI_AKUN_CHROME.md) --
+        # display virtual permanen, bukan xvfb-run --auto-servernum (yang
+        # bikin server baru sekali pakai tiap invocation, tidak konsisten
+        # dengan kebiasaan mesin ini). Kalau Xvfb :99 kebetulan sudah aktif
+        # untuk buku/sound-extractor, numpang; kalau belum, dinyalakan di
+        # bawah. Install sekali di runner kalau xvfb belum ada:
+        #   sudo apt-get install -y xvfb
         shell: bash --noprofile --norc -uo pipefail {0}
         run: |
+          export DISPLAY=":99"
+          if pgrep -f "Xvfb :99" >/dev/null 2>&1; then
+            echo "Xvfb :99 sudah aktif, numpang (kemungkinan dipakai buku/sound-extractor)."
+          else
+            echo "Xvfb :99 belum jalan, menyalakan sekarang (mengikuti konvensi buku-extractor) ..."
+            Xvfb :99 -screen 0 1280x1024x24 >/tmp/xvfb-refresh-bearer.log 2>&1 &
+            disown
+            sleep 2
+          fi
+
           run_refresh() {
             local label="$1"
             local username="$2"
